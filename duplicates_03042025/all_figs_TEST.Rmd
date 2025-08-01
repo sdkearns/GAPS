@@ -1,0 +1,3968 @@
+---
+title: "SFRN_manuscript"
+author: "Tanner"
+date: "2024-06-13"
+output: html_document
+---
+
+load libraries
+```{r setup, include=FALSE}
+library(MASS)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+library(stats)
+library(nnet)
+library(coefplot)
+library(pROC)
+library(broom)
+library(reshape2)
+library(gplots)
+library(pheatmap)
+library(wesanderson)
+library(tidyr)
+library(stringr)
+library(writexl)
+library(readxl)
+library(dunn.test)
+library(broom)
+library(dplyr)
+library(scales)
+library(rcompanion)
+library(e1071)
+library(viridis)
+library(pROC)
+library(PRROC)
+library(rpart)
+library(ggpattern)
+library(corrplot)
+library(ROCR)
+library(gridExtra)
+library(openxlsx)
+library(igraph)
+library(ggraph)
+library(drawProteins)
+library(readr)
+library(biomaRt)
+library(GenomicRanges)
+library(mclust)
+library(data.table)
+library(Hmisc)
+library(rstatix)
+
+```
+
+
+INDEX
+Fig1.
+a. (left) 394 (right)  227
+
+Figure 1.
+a. (left)  394, stats  337 (right)  227 
+b.  459, stats  337
+c. 2591, stats 2647
+d. 2730
+e. 2430
+
+Figure 2. 
+a.  679 stats,  585
+b.  1212, stats  1119
+c. 2591, stats 2647
+d. 2430
+e. 2972, stats 2972
+f. right 2998, stats 2998; left 3021, stats 2998
+
+Figure S2.
+a.  896
+b.  1372
+c.  974
+
+Figure S3.
+a.  1172, stats  1172
+b.  1267
+c.  863
+
+Figure S4.
+a. 1412
+b. 1474
+c. 1571
+d. NA
+e. 2050
+
+Figure 3.
+a. 1912, stats 1847
+b. left 2756, right 2851, stats 2851
+
+Figure 4. 
+a. 2709, stats 2647
+b. 2730
+c. 2430, stats 2549
+
+Figure 5. 
+a. 2647, stats 2690
+b. 2506, 3183
+c. 2765, 3154
+d. left 3135, stats 3135; right 3106, stats 3106
+
+Figure 6.
+a. left 3396, right 3396
+b. 3396, stats 3396
+c. 3396, stats 3396
+d. 3531, 3591
+e. 3481, 3522
+
+PRS**************************************
+
+Input the PRS data
+
+```{r cars1}
+# Read the PRS data
+prs_data <- read.table('/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/PRS_array_for_manuscript_fixed.txt', header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+
+```
+
+Set color palette
+```{r cars2}
+group_colors  <- c("grey","#3C8C78") 
+```
+
+
+Define your list of traits to analyze
+
+```{r cars3}
+# List of traits to analyze
+traits <- c("Heart_rate", "LQTS", "PR_interval", "QTc", "Afib", "HRV", "BP", "QRS", "HCM", "LVEDV","LVEDVI","LVEF","LVESV","LVESVI","SV","SVI","GGE","Focal_Epilepsy")
+traits
+```
+
+
+```{r cars4}
+prs_data <- prs_data %>%
+  mutate(across(all_of(traits), ~ scale(.x) %>% as.numeric, .names = "Normalized_{.col}"))
+
+```
+
+
+```{r cars5}
+group_definitions <- list(
+  "Control" = c(1),
+  "Case"= c(2,3,4,5,6)
+)
+```
+
+
+Format the data
+```{r cars6}
+# Function to determine the group for a given arrest ontology value
+get_group <- function(arrest_ontology_value) {
+  for (group_name in names(group_definitions)) {
+    if (arrest_ontology_value %in% group_definitions[[group_name]]) {
+      return(group_name)
+    }
+  }
+  return(as.character(arrest_ontology_value)) 
+}
+
+# Categorize arrest_ontology into specified groups
+prs_data <- prs_data %>%
+  rowwise() %>%
+  mutate(arrest_group = get_group(arrest_ontology))
+
+# Filter out only the relevant groups for the plot
+relevant_groups <- names(group_definitions)
+filtered_data <- prs_data %>%
+  filter(arrest_group %in% relevant_groups)
+
+# Generate normalized column names based on the traits list
+normalized_traits <- paste("Normalized", traits, sep = "_")
+
+# Filter out non-existing columns from the normalized_traits
+existing_normalized_traits <- normalized_traits[normalized_traits %in% names(filtered_data)]
+
+# Generate normalized column names based on the traits list
+normalized_traits <- paste("Normalized", traits, sep = "_")
+
+
+
+
+# Reshape the filtered data to long format for the normalized traits
+melted_data_normalized <- melt(filtered_data, 
+                               id.vars = c('arrest_group'), 
+                               measure.vars = existing_normalized_traits)
+```
+
+
+Split into discovery or replication
+```{r cars7}
+prs_data_discovery <- filtered_data %>%
+  filter(Set == "Discovery")
+
+prs_data_replication <- filtered_data %>%
+  filter(Set == "Replication")
+```
+
+
+Make the Corrplot
+```{r cars8}
+# Select only the relevant columns for correlation
+data_for_correlation <- prs_data_discovery[, normalized_traits]
+
+#order the traits
+corr_traits <- c(
+  "Normalized_QRS", 
+  "Normalized_BP",
+  "Normalized_SVI",
+  "Normalized_LVESV", 
+  "Normalized_PR_interval", 
+  "Normalized_HRV", 
+  "Normalized_GGE", 
+  "Normalized_LVEDV",
+  "Normalized_LVESVI", 
+  "Normalized_Focal_Epilepsy", 
+  "Normalized_HCM", 
+  "Normalized_LQTS", 
+  "Normalized_Afib", 
+  "Normalized_LVEDVI", 
+  "Normalized_SV", 
+  "Normalized_Heart_rate", 
+  "Normalized_QTc", 
+  "Normalized_LVEF"
+)
+
+
+# Ensure the DataFrame is ordered according to trait preferences
+data_for_correlation_ordered <- data_for_correlation[, corr_traits]
+
+# Calculate correlation matrix
+cor_matrix_ordered <- cor(data_for_correlation_ordered, use = "complete.obs")
+
+#plot correlation
+corrplot(cor_matrix_ordered, 
+         method = "color",  
+         type = "full",
+         tl.col = "black",
+         tl.srt = 45,
+         cl.ratio = 0.2,
+         col = colorRampPalette(c("#05618F", "white", "#F0BE3C"))(200),
+         diag = FALSE,
+         addgrid.col = "black"  
+)
+
+correlation_results <- rcorr(as.matrix(data_for_correlation_ordered), type = "pearson")
+correlation_results$P
+```
+
+
+Test for ANOVA
+```{r cars705}
+check_anova_assumptions <- function(data, trait) {
+  # Ensure 'arrest_group' is a factor
+  data$arrest_group <- as.factor(data$arrest_group)
+  
+  # Fit the ANOVA model
+  formula <- as.formula(paste(trait, "~ arrest_group"))
+  anova_model <- aov(formula, data = data)
+  
+  # Extract residuals
+  residuals <- residuals(anova_model)
+  
+  # Shapiro-Wilk test for normality
+  shapiro_test <- shapiro.test(residuals)
+  shapiro_p_value <- shapiro_test$p.value
+  
+  # Levene's Test for homogeneity of variances
+  library(car)
+  levene_test <- leveneTest(formula, data = data)
+  levene_p_value <- levene_test$`Pr(>F)`[1]
+  
+  # Bartlett's Test for homogeneity of variances
+  bartlett_test <- bartlett.test(formula, data = data)
+  bartlett_p_value <- bartlett_test$p.value
+  
+  # Create a summary table with the test results
+  data.frame(
+    Trait = trait,
+    Shapiro_Wilk_p_value = shapiro_p_value,
+    Levene_p_value = levene_p_value,
+    Bartlett_p_value = bartlett_p_value
+  )
+}
+
+anova_assumptions_results <- lapply(normalized_traits, function(trait) check_anova_assumptions(prs_data_discovery, trait))
+
+# Combine the results into a single data frame
+anova_assumptions_df <- do.call(rbind, anova_assumptions_results)
+
+# Print the results
+print(anova_assumptions_df)
+```
+
+
+Since some do not meet ANOVA criteria, we go with nonparametric
+```{r cars10}
+# Define Wilcoxon Rank Sum test function with median difference calculation
+perform_wilcoxon_test <- function(data, trait) {
+  # Convert data to appropriate format
+  data <- data %>%
+    select(arrest_group, all_of(trait)) %>%
+    drop_na()
+
+  # Calculate medians for each group
+  group_medians <- data %>%
+    group_by(arrest_group) %>%
+    summarise(median_value = median(!!sym(trait)))
+
+  # Calculate the difference in medians
+  diff_median <- diff(group_medians$median_value)
+  
+  # Perform Wilcoxon rank-sum test
+  wilcoxon_test_result <- wilcox_test(data, as.formula(paste(trait, "~ arrest_group")))
+
+  # Extract p-value
+  p_value <- wilcoxon_test_result$p
+
+  # Adjust p-values manually (divide by 18)
+  p_adjusted <- p_value * 18
+  
+  # Create a data frame with the test results
+  result_df <- data.frame(
+    Trait = trait,
+    p_value = p_value,
+    p_adjusted = p_adjusted,
+    significant = p_adjusted < 0.05,
+    diff_median = diff_median  # Difference in medians between groups
+  )
+
+  return(result_df)
+}
+
+# Perform Wilcoxon test for each trait and store results
+wilcoxon_results <- lapply(normalized_traits, function(trait) perform_wilcoxon_test(prs_data_discovery, trait))
+
+# Combine all Wilcoxon results into a single data frame
+combined_wilcoxon_results <- do.call(rbind, wilcoxon_results)
+
+# Print combined Wilcoxon results with p-values and median differences
+print("Wilcoxon Rank Sum Test Results with Manual P-value Adjustments and Median Differences:")
+print(combined_wilcoxon_results)
+
+
+```
+
+
+```{r cars11}
+
+# Define the groups for metrics and syndromes
+metrics <- c("Normalized_Heart_rate", "Normalized_PR_interval", "Normalized_QTc", "Normalized_HRV", "Normalized_BP", "Normalized_QRS",
+             "Normalized_LVEDV", "Normalized_LVEDVI", "Normalized_LVEF", "Normalized_LVESV", "Normalized_LVESVI", "Normalized_SV", "Normalized_SVI")
+syndromes <- c("Normalized_LQTS", "Normalized_Afib", "Normalized_HCM", "Normalized_GGE", "Normalized_Focal_Epilepsy")
+
+# Categorize each trait as 'Metrics' or 'Syndromes'
+combined_wilcoxon_results$Category <- ifelse(combined_wilcoxon_results$Trait %in% metrics, "Metrics",
+                                             ifelse(combined_wilcoxon_results$Trait %in% syndromes, "Syndromes", "Combined"))
+
+# Reorder the levels of Trait based on the Category
+combined_wilcoxon_results <- combined_wilcoxon_results %>%
+    mutate(Trait = factor(Trait, levels = unique(Trait[order(Category)])))
+
+# Transform P-values to -log10 scale
+combined_wilcoxon_results$NegLogP <- -log10(combined_wilcoxon_results$p_value)
+
+# Calculate the -log10(0.05) for the reference line
+threshold <- -log10(0.05)
+threshold2 <- -log10(0.05/18)
+
+# Create a new variable for coloring based on P-value significance (already computed in the original df)
+combined_wilcoxon_results$Significant <- ifelse(combined_wilcoxon_results$p_value < 0.05, "Significant", "Not Significant")
+
+# Combine metrics and syndromes into a single ordered list
+ordered_traits <- c(
+  "Normalized_QRS", 
+  "Normalized_BP",
+  "Normalized_SVI",
+  "Normalized_LVESV", 
+  "Normalized_PR_interval", 
+  "Normalized_HRV", 
+  "Normalized_GGE", 
+  "Normalized_LVEDV",
+  "Normalized_LVESVI", 
+  "Normalized_Focal_Epilepsy", 
+  "Normalized_HCM", 
+  "Normalized_LQTS", 
+  "Normalized_Afib", 
+  "Normalized_LVEDVI", 
+  "Normalized_SV", 
+  "Normalized_Heart_rate", 
+  "Normalized_QTc", 
+  "Normalized_LVEF"
+)
+
+# Update the 'Trait' column to have this specific order
+combined_wilcoxon_results$Trait <- factor(combined_wilcoxon_results$Trait, levels = ordered_traits)
+
+# Create the plot, coloring by diff_median instead of Z_value
+p3 <- ggplot(combined_wilcoxon_results, aes(x = Trait, y = NegLogP, color = diff_median)) +
+    geom_segment(aes(xend = Trait, yend = 0), size = 1) +  
+    geom_point(size = 3) +
+    geom_hline(yintercept = threshold, linetype = "dotted", color = "Black") +  
+    geom_hline(yintercept = threshold2, linetype = "dotted", color = "Red") + 
+    scale_color_gradient2(low = "#3C8C78", mid = "white", high = "black", midpoint = 0) +  
+    theme_cowplot() +  
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),  
+          strip.text.x = element_text(size = 10)) +  
+    labs(y = "-log10(P-value)", x = "Trait", color = "Median Difference", title = "Lollipop Plot of -log10(P-values) by Trait")
+
+# Display the plot
+print(p3)
+
+```
+
+
+
+
+```{r cars12}
+# Function to generate plots for a given trait
+generate_plots_for_trait <- function(data, trait, group_colors) {
+  # Rank the scores for the specified trait
+  data$rank <- rank(data[[trait]], na.last = "keep")
+  
+  # Density plot for the trait
+  density_plot <- ggplot(data, aes(x = rank, fill = arrest_group, y = ..density..)) +
+    geom_density(alpha = 0.6) +
+    scale_fill_manual(values = group_colors) +
+    labs(title = paste("Relative Density of Overall", trait, "Trait Ranks Across Arrest Groups"),
+         x = paste("Overall Rank of", trait, "Scores"),
+         y = "Relative Density") +
+    theme_cowplot(12) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # CDF plot for the trait
+  cdf_plot <- ggplot(data, aes(x = rank, color = arrest_group)) +
+    stat_ecdf(geom = "step", size = 1) +
+    scale_color_manual(values = group_colors) +
+    labs(title = paste("CDF of Overall", trait, "Trait Ranks Across Arrest Groups"),
+         x = paste("Overall Rank of", trait, "Scores"),
+         y = "Cumulative Proportion") +
+    theme_cowplot(12) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # Combine the plots
+  combined_plot <- plot_grid(density_plot, cdf_plot, ncol = 1, align = 'v', labels = c("A", "B"))
+  
+  # Return the combined plot
+  return(combined_plot)
+}
+
+
+# List of traits to plot
+traits <- c("BP", "Afib", "QRS","LVEF","Heart_rate")
+
+# Initialize an empty list to store plots
+plots_list <- list()
+
+# Loop through each trait and generate plots, storing them in the list
+for(trait in traits) {
+  plots_list[[trait]] <- generate_plots_for_trait(prs_data_discovery, trait, group_colors)
+}
+
+######## Access each plot by its trait name from the plots_list ##########
+# For example, to print the plot for QRS, use:
+print(plots_list[["QRS"]])
+
+print(plots_list[["BP"]])
+```
+
+
+Coding******************************************************************************************************************
+
+```{r cars101}
+coding_stats <- read.table("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/statistics_by_individual_replication_for_manuscript_fixed_NEW.txt", header = TRUE, sep = "\t")
+
+coding_stats_discovery <- coding_stats[coding_stats$Replication == 0, ]
+```
+
+Categorize the data
+```{r cars102}
+categorized_coding_stats_discovery <- coding_stats_discovery %>%
+  mutate(Category_Group = case_when(
+    Category == 1 ~ "Control",
+    Category %in% 2:6 ~ "Case"
+  ))
+
+
+```
+
+
+Merge some of the column data to get the desired AF intervals
+
+```{r cars103}
+categorized_coding_stats_discovery <- categorized_coding_stats_discovery %>%
+  mutate(Epilepsy_01_00001 = (Epilepsy_missense_variant_0.01 + Epilepsy_missense_variant_0.001),
+  Epilepsy_00001 = (Epilepsy_missense_variant_0.00001 + Epilepsy_missense_singleton),
+  Epilepsy_total_missense = (Epilepsy_missense_common +Epilepsy_missense_variant_0.01 + Epilepsy_missense_variant_0.001 + Epilepsy_missense_variant_0.00001 +
+                               Epilepsy_missense_singleton))
+
+categorized_coding_stats_discovery <- categorized_coding_stats_discovery %>%
+  mutate(Cardiomyopathy_01_00001 = (Cardiomyopathy_missense_variant_0.01 + Cardiomyopathy_missense_variant_0.001),
+  Cardiomyopathy_00001 = (Cardiomyopathy_missense_variant_0.00001 +Cardiomyopathy_missense_singleton),
+  Cardiomyopathy_total_missense = (Cardiomyopathy_missense_common + Cardiomyopathy_missense_variant_0.01 + Cardiomyopathy_missense_variant_0.001 +
+                                     Cardiomyopathy_missense_variant_0.00001 +Cardiomyopathy_missense_singleton))
+
+#clean it up to remove inadvertent NAs or infs
+categorized_coding_stats_discovery <- categorized_coding_stats_discovery %>%
+  dplyr::select(-ID, -Category) %>% 
+  na.omit() %>% 
+  dplyr::filter_all(all_vars(!is.infinite(.))) 
+
+# Aggregate the Data to compute mean and standard deviation for each numeric column
+collapsed_coding_stats <- categorized_coding_stats_discovery %>%
+  group_by(Category_Group) %>%
+  summarise(across(where(is.numeric), list(mean = ~mean(., na.rm = TRUE), 
+                                           std = ~sd(., na.rm = TRUE))))
+
+# clean it up to remove inadvertent NAs 
+collapsed_coding_stats <- na.omit(collapsed_coding_stats)
+
+
+```
+
+
+
+
+Perform permutation simulation and test
+```{r cars106}
+# List of coding variables to analyze
+coding_variables_to_analyze <- c("Cardiomyopathy_HIGH", "Cardiomyopathy_start_lost", 
+                                 "Cardiomyopathy_stop_gained", "Cardiomyopathy_01_00001", 
+                                 "Cardiomyopathy_00001", "Cardiomyopathy_total_missense", "PLP_Cardiomyopathy",
+                                 "Epilepsy_HIGH", "Epilepsy_start_lost", 
+                                 "Epilepsy_stop_gained", "Epilepsy_01_00001", 
+                                 "Epilepsy_00001", "Epilepsy_total_missense", "PLP_Epilepsy")
+
+# Define the permutation function
+permutation_test <- function(data, var, group_var, num_permutations = 10000) {
+  
+  # Calculate the observed difference in means between the two groups
+  observed_stat <- abs(mean(data[[var]][data[[group_var]] == "Case"], na.rm = TRUE) - 
+                       mean(data[[var]][data[[group_var]] == "Control"], na.rm = TRUE))
+  
+  # Create an empty vector to store the permutation statistics
+  perm_stats <- numeric(num_permutations)
+  
+  # Perform the permutations
+  for (i in 1:num_permutations) {
+    # Randomly shuffle the group labels
+    permuted_group <- sample(data[[group_var]])
+    
+    # Calculate the difference in means for the permuted data
+    permuted_stat <- abs(mean(data[[var]][permuted_group == "Case"], na.rm = TRUE) - 
+                         mean(data[[var]][permuted_group == "Control"], na.rm = TRUE))
+    
+    # Store the permuted statistic
+    perm_stats[i] <- permuted_stat
+  }
+  
+  # Calculate the p-value (proportion of permuted stats >= observed stat)
+  p_value <- mean(perm_stats >= observed_stat)
+  
+  return(list(observed_stat = observed_stat, perm_stats = perm_stats, p_value = p_value))
+}
+
+# Initialize a dataframe to store p-values for each variable
+p_value_results <- data.frame(Variable = character(), Observed_Stat = numeric(), p_value = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each variable and perform the permutation test
+for (var in coding_variables_to_analyze) {
+  # Run the permutation test
+  test_result <- permutation_test(categorized_coding_stats_discovery, var, "Category_Group")
+  
+  # Extract the permuted statistics, observed statistic, and p-value
+  perm_stats <- test_result$perm_stats
+  observed_stat <- test_result$observed_stat
+  p_value <- test_result$p_value
+  
+  # Store the p-value and observed statistic in the dataframe
+  p_value_results <- rbind(p_value_results, data.frame(Variable = var, 
+                                                       Observed_Stat = observed_stat, 
+                                                       p_value = p_value))
+  
+  # Create a data frame for plotting the permutation distribution
+  perm_df <- data.frame(perm_stats = perm_stats)
+  
+    # Plot the permutation distribution with the observed statistic marked and p-value
+  p <- ggplot(perm_df, aes(x = perm_stats)) +
+    geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+    geom_vline(aes(xintercept = observed_stat), color = "red", linetype = "dashed", size = 1) +
+    labs(title = paste("Permutation Test for", var),
+         x = "Permuted Statistic",
+         y = "Frequency",
+         subtitle = paste("Observed Statistic =", round(observed_stat, 4), 
+                          "| P-value =", format(p_value, digits = 4))) +  # Add p-value to subtitle
+    theme_minimal()
+  
+  # Print the plot
+  print(p)
+}
+
+# Print the table of p-values
+print("P-value Results for All Variables:")
+print(p_value_results)
+```
+
+
+Create the Function to plot each column as a ratio to the means from Group 1
+
+```{r cars107}
+
+plot_column_ratio <- function(data, col_name) {
+  # Calculate the mean and standard deviation for Control
+  group1_mean <- mean(data[data$Category_Group == "Control", col_name], na.rm = TRUE)
+  group1_sd <- sd(data[data$Category_Group == "Control", col_name], na.rm = TRUE)
+  
+  # Calculate the ratio for each group relative to Group 1
+  data_summary <- data %>%
+  group_by(Category_Group) %>%
+  summarise(mean_value = mean(.data[[col_name]], na.rm = TRUE),
+            sd_value = sd(.data[[col_name]], na.rm = TRUE), 
+            n = n()) %>%
+  mutate(ratio = mean_value / group1_mean,
+         sem_value = sd_value / sqrt(n), 
+         sem_ratio = sem_value / group1_mean, # SEM scaled to the group 1, just like the mean value
+         ci_lower = ratio - (1.96 * sem_ratio), # Lower bound of the CI
+         ci_upper = ratio + (1.96 * sem_ratio)) # Upper bound of the CI
+  
+  return(list(summary_data = data_summary))
+}
+
+```
+
+
+Plot the data relative to group 1
+```{r cars108}
+# Initialize an empty dataframe to store summary data
+combined_coding_stats_summary_df <- data.frame(Category_Group = character(), col_name = character(), mean = numeric(), std = numeric(), stringsAsFactors = FALSE)
+
+
+# List of all columns to plot
+columns_to_plot <- setdiff(names(categorized_coding_stats_discovery), c("ID", "Category", "Category_Group"))
+
+# Loop through each column and plot relative to Category_Group1 (Crontrol)
+for (col in columns_to_plot) {
+  plot_data <- plot_column_ratio(categorized_coding_stats_discovery, col)
+  # Append summary data to combined_coding_stats_summary_df
+  combined_coding_stats_summary_df <- bind_rows(combined_coding_stats_summary_df, mutate(plot_data$summary_data, col_name = col))
+}
+
+
+```
+
+
+
+Plot the data relative to group in a better way
+```{r cars109}
+# Subset the data for the specified variables
+selected_coding_data <- combined_coding_stats_summary_df %>%
+  filter(col_name %in% c("variant_count", 
+                         "Cardiomyopathy_total_missense",
+                         "Cardiomyopathy_01_00001",
+                         "Cardiomyopathy_00001",
+                         "Epilepsy_total_missense",
+                         "Epilepsy_01_0001",
+                         "Epilepsy_00001",
+                         "PLP_Cardiomyopathy",
+                         "PLP_Epilepsy",
+                         "Cardiomyopathy_start_lost",
+                         "Cardiomyopathy_stop_gained",
+                         "Cardiomyopathy_HIGH",
+                         "Epilepsy_start_lost",
+                         "Epilepsy_HIGH",
+                         "Epilepsy_stop_gained"
+                         ),
+         Category_Group != "Control") 
+
+
+# Define the specific order for "Epilepsy" and CMAR variants
+levels_order <- c("variant_count",
+                  "PLP_Epilepsy",
+                  "Epilepsy_00001",
+                  "Epilepsy_01_0001",
+                  "Epilepsy_total_missense",
+                  "Epilepsy_start_lost",
+                  "Epilepsy_stop_gained",
+                  "Epilepsy_HIGH",
+                  "PLP_Cardiomyopathy",
+                  "Cardiomyopathy_00001",
+                  "Cardiomyopathy_01_00001",
+                  "Cardiomyopathy_total_missense",
+                  "Cardiomyopathy_start_lost",
+                  "Cardiomyopathy_stop_gained",
+                  "Cardiomyopathy_HIGH"
+)
+
+
+selected_coding_data$col_name <- factor(selected_coding_data$col_name, levels = levels_order)
+
+# Plot
+coding_stats_plot <- ggplot(selected_coding_data, aes(y = col_name, x = ratio, color = Category_Group)) +
+  geom_point(position = position_dodge(width = 1), size = 3) +
+  geom_errorbar(aes(xmin = ratio - sem_ratio, xmax = ratio + sem_ratio), position = position_dodge(width = 0.5), width = 1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  scale_color_manual(values = "#3C8C78") +
+  labs(title = "Ratio Compared to Control +/-SEM",
+       y = "Variant",
+       x = "Ratio to Control Mean",
+       color = "Category Group") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 8), 
+        axis.text.y = element_text(size = 8, hjust = 1),
+        axis.title.x = element_text(size = 8), 
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8),
+        plot.title = element_text(size = 8, hjust = 0.5),
+        plot.subtitle = element_text(size = 8),
+        plot.caption = element_text(size = 8),
+        plot.margin = margin(15, 15, 15, 15)) +
+  scale_x_continuous(limits = c(-2, 12))
+
+
+print(coding_stats_plot)
+
+
+# Print the table of p-values
+print("P-value Results for All Variables:")
+print(p_value_results)
+
+```
+
+
+
+
+Input the data
+
+```{r cars110}
+# Pull in the gene data
+gene_data <- read.csv("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/individual_variants_by_gene_for_manuscript_fixed_NEW.csv")
+
+# Read the cohort data
+cohort <- read.table("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/SFRN_cohort_for_manuscript_fixed.txt", sep = "\t", header = TRUE)
+
+# add the arrest category to each
+gene_data$Category <- cohort$arrest_ontology[match(gene_data$ID, cohort$CGM_id)]
+
+gene_data_discovery <- gene_data %>%
+  filter(Set == "Discovery")
+
+```
+
+
+Summarize the data by GENE, counting the number of variants for each gene
+Filter for Category > 1 and then group and summarize
+
+```{r cars121}
+variants_per_gene_Cat_2_6 <- gene_data_discovery %>%
+  filter(Category > 1) %>%
+  group_by(GENE) %>%
+  summarise(
+    HIGH = sum(HIGH, na.rm = TRUE),
+    PLP = sum(PLP, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Print the result
+print(variants_per_gene_Cat_2_6)
+
+```
+
+
+Filter for Category == 1 and then group and summarize
+
+```{r cars122}
+
+variants_per_gene_Cat_1 <- gene_data_discovery %>%
+  filter(Category == 1) %>%
+  group_by(GENE) %>%
+  summarise(
+    HIGH = sum(HIGH, na.rm = TRUE),
+    PLP = sum(PLP, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Print the result
+print(variants_per_gene_Cat_1)
+
+```
+
+
+Load gene lists from text files
+
+```{r cars123}
+genes_CMAR1 <- readLines("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/SDY_CMAR1_list.txt")
+genes_CMAR2 <- readLines("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/SDY_CMAR2_list.txt")
+genes_EIEE_OMIM <- readLines("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/SDY_EIEE_OMIM_list.txt")
+genes_Epilepsy <- readLines("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/SDY_Epilepsy_list.txt")
+
+```
+
+Annotate gene with source panel
+
+```{r cars124}
+genes_CMAR1 <- data.frame(Gene = genes_CMAR1, Source = "Cardiomyopathy")
+genes_CMAR2 <- data.frame(Gene = genes_CMAR2, Source = "Cardiomyopathy")
+genes_EIEE_OMIM <- data.frame(Gene = genes_EIEE_OMIM, Source = "Epilepsy")
+genes_Epilepsy <- data.frame(Gene = genes_Epilepsy, Source = "Epilepsy")
+
+# Replace "\"AARS1\"" with "AARS"
+genes_EIEE_OMIM$Gene <- ifelse(genes_EIEE_OMIM$Gene == "\"AARS1\"", "AARS", genes_EIEE_OMIM$Gene)
+
+# Replace "\"KIAA2022\"" with "NEXMIF"
+genes_Epilepsy$Gene <- ifelse(genes_Epilepsy$Gene == "\"NEXMIF\"", "KIAA2022", genes_Epilepsy$Gene)
+
+
+```
+
+
+Append panel source to the gene_data
+```{r cars125}
+
+# Combine all lists into one dataframe
+all_genes <- rbind(genes_CMAR1, genes_CMAR2, genes_EIEE_OMIM, genes_Epilepsy)
+
+# Sort by Gene and Source to ensure "Cardiomyopathy" comes first
+all_genes <- all_genes[order(all_genes$Gene, all_genes$Source), ]
+
+# Remove duplicates, keeping the first occurrence
+all_genes <- all_genes[!duplicated(all_genes$Gene), ]
+
+# Clean the 'Gene' column in 'all_genes' by removing quotes and backslashes
+all_genes$Gene <- gsub('\"', '', all_genes$Gene)
+
+# Ensure that the 'GENE' column in 'gene_data_discovery' and 'Gene' in 'all_genes' are character type
+gene_data_discovery$GENE <- as.character(gene_data_discovery$GENE)
+all_genes$Gene <- as.character(all_genes$Gene)
+
+# find the index of each gene in 'all_genes' and use this index to assign the corresponding 'Source' to a new column in 'gene_data'
+gene_data_discovery$Source <- all_genes$Source[match(gene_data_discovery$GENE, all_genes$Gene)]
+
+# Now, 'gene_data' will have a new column 'Source' with the source of each gene
+# based on the lookup from 'all_genes'
+
+# View the first few rows to verify the new 'Source' has been added
+head(gene_data_discovery)
+
+```
+
+Add the source to the category 1 variants list
+
+```{r cars126}
+variants_per_gene_Cat_1$Source <- all_genes$Source[match(variants_per_gene_Cat_1$GENE, all_genes$Gene)]
+
+head(variants_per_gene_Cat_1)
+```
+
+Add the source to the category 2-6 variants list
+```{r cars127}
+variants_per_gene_Cat_2_6$Source <- all_genes$Source[match(variants_per_gene_Cat_2_6$GENE, all_genes$Gene)]
+
+head(variants_per_gene_Cat_2_6)
+```
+
+combine the variants together now
+```{r cars128}
+
+# Add a new column to indicate the category
+variants_per_gene_Cat_1 <- variants_per_gene_Cat_1 %>%
+  mutate(Category = "1")  
+
+# Add a new column to indicate the category range
+variants_per_gene_Cat_2_6 <- variants_per_gene_Cat_2_6 %>%
+  mutate(Category = "2-6")  
+
+# Combine the two datasets
+combined_variants <- bind_rows(variants_per_gene_Cat_1, variants_per_gene_Cat_2_6)
+
+# Print the combined dataset
+print(combined_variants)
+```
+
+
+```{r cars129}
+# Filter dataset where High > 0
+combined_variants_High <- combined_variants %>% filter(HIGH > 0)
+
+# Create a label function
+custom_labeller <- function(variable, value) {
+  if (variable == "Category") {
+    return(ifelse(value == "1", "Control", "Case"))
+  }
+  return(value)
+}
+
+# Create the plot with custom labeller
+High_variant_plot <- ggplot(combined_variants_High, aes(x = GENE, y = Category, fill = HIGH)) +
+  geom_tile() + 
+  scale_fill_gradientn(colors = c("#3C8C78", "#dcb43c", "#ae7e46"), 
+                       values = scales::rescale(c(0, 0.5, 1))) + 
+  facet_wrap(~ Source, scales = "free_x", ncol = 1) + 
+  labs(title = "High Variants Heatmap",
+       x = "Gene",
+       y = "Category",
+       fill = "Count") +
+  theme_cowplot(12) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        strip.background = element_blank(), 
+        strip.placement = "outside") +
+  scale_y_discrete(labels = function(x) custom_labeller("Category", x))
+
+# Print the plot
+print(High_variant_plot)
+
+```
+
+```{r cars130}
+# Create a custom labeller function for PLP_plot
+custom_labeller_plp <- function(variable, value) {
+  if (variable == "Category") {
+    return(ifelse(value == "1", "Control", "Case"))
+  }
+  return(value)
+}
+
+# Filter datasets where PLP > 0
+combined_variants_PLP <- combined_variants %>% filter(PLP > 0)
+
+# Create the PLP plot with custom labeller
+PLP_plot <- ggplot(combined_variants_PLP, aes(x = GENE, y = Category, fill = PLP)) +
+  geom_tile() + 
+  scale_fill_gradientn(colors = c("#3C8C78", "#dcb43c", "#ae7e46"), 
+                       values = scales::rescale(c(0, 0.5, 1))) + 
+  facet_wrap(~ Source, scales = "free_x", ncol = 1) + 
+  labs(title = "PLP Heatmap",
+       x = "Gene",
+       y = "Category",
+       fill = "Count") +
+  theme_cowplot(12) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        strip.background = element_blank(), 
+        strip.placement = "outside") +
+  scale_y_discrete(labels = function(x) custom_labeller_plp("Category", x))
+
+# Print the plot
+print(PLP_plot)
+
+```
+
+
+Now bring in the module data
+```{r cars135}
+
+modules <- read_excel("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/cardio_gene_sets.xlsx")
+
+```
+
+
+annotate the gene_data wiht the modules
+```{r cars16}
+
+module_data <- left_join(gene_data_discovery, modules, by = c("GENE" = "Gene"))
+
+# View the first few rows of the updated data
+head(module_data)
+
+```
+
+
+NOW PLOT THE PLPs by their expert-defined categories. The size is the relative number of variants per gene in the category. the Color is the absolute number of variants
+
+```{r cars137}
+
+#Filter NAs ans aggregate the data
+module_data <- module_data %>%
+  filter(!is.na(Module))
+
+module_data <- module_data %>%
+  mutate(Category_Group = ifelse(Category == 1, "Category 1", "Categories 2-6"))
+
+#count up the variants
+module_summary <- module_data %>%
+  group_by(Module, Category_Group) %>%
+  summarise(Total_PLP_variant = sum(PLP, na.rm = TRUE)) %>%
+  ungroup() 
+
+# First, calculate the number of genes per module
+genes_per_module <- modules %>%
+  group_by(Module) %>%
+  summarise(Num_Genes = n()) %>%
+  ungroup()
+
+# Merge this information with your module_summary data frame
+module_summary <- module_summary %>%
+  left_join(genes_per_module, by = c("Module" = "Module"))
+
+# Calculate the size relative to the number of genes per module
+module_summary <- module_summary %>%
+  mutate(Relative_Size = Total_PLP_variant / Num_Genes)
+
+# Filter the data to only include "Categories 2-6"
+module_summary_filtered <- module_summary %>%
+  filter(Category_Group == "Categories 2-6")
+
+module_order <- module_summary_filtered %>%
+  group_by(Module) %>%
+  summarise(Sort_Metric = mean(Total_PLP_variant, na.rm = TRUE)) %>%
+  arrange(desc(Sort_Metric)) %>%
+  .$Module
+
+module_summary_filtered$Module <- factor(module_summary_filtered$Module, levels = module_order)
+
+# Now plot with the reordered Module
+modules_plot <- ggplot(module_summary_filtered, aes(x = Module, y = Category_Group, size = Total_PLP_variant, color = Relative_Size)) +
+  geom_point(shape = 15, alpha = 1) +
+  scale_size(range = c(3, 20), name = "Number of PLPs") + 
+  scale_color_gradient(low = "Grey", high = "#05618F", name = "# of PLPs relative to Module size") +
+  theme_minimal() +
+  labs(title = "Total PLP by Module (Cases)",
+       x = "Module",
+       y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(modules_plot)
+
+```
+
+
+
+```{r cars138}
+
+#Count the High effect variants
+aggregated_data <- module_data %>%
+  group_by(ID, Module, Category) %>%
+  summarise(High_count = sum(HIGH),
+            .groups = 'drop')
+
+#split off controls
+data_cat_1 <- aggregated_data %>%
+  filter(Category %in% c(1))
+
+#identify IDs with any 'High_count' greater than 0
+ids_with_both_1 <- data_cat_1 %>%
+  group_by(ID) %>%
+  summarise(High_count_any = any(High_count > 0)) %>%
+  filter(High_count_any) %>%
+  dplyr::select(ID)
+
+# Filter to include only rows that have IDs with High_count > 0
+modules_with_both_1 <- data_cat_1 %>%
+  semi_join(ids_with_both_1, by = "ID")
+
+#find all possible pairs of modules where 'High_count' is greater than 0
+# and generate a new df with each row representing a unique pair of modules for each ID.
+module_pairs_for_ids_1 <- modules_with_both_1 %>%
+  group_by(ID) %>%
+  do({
+    data.frame(t(combn(unique(.$Module), 2)), stringsAsFactors = FALSE)
+  }) %>%
+  dplyr::rename(Module1 = X1, Module2 = X2) %>%
+  left_join(modules_with_both_1, by = c("ID", "Module1" = "Module")) %>%
+  left_join(modules_with_both_1, by = c("ID", "Module2" = "Module"), suffix = c("_1", "_2")) %>%
+  filter(High_count_2 > 0 | High_count_1 > 0)
+
+# Count occurrences of module pairs across IDs
+module_pair_counts_1 <- module_pairs_for_ids_1 %>%
+  group_by(Module1, Module2) %>%
+  summarise(Count = n_distinct(ID), .groups = 'drop')
+
+
+
+#split off cases
+data_cat_2_6 <- aggregated_data %>%
+  filter(Category %in% c(2,3,4,5,6))
+
+#identify IDs with any 'High_count' greater than 0
+ids_with_both_2_6 <- data_cat_2_6 %>%
+  group_by(ID) %>%
+  summarise(Missense_any = any(High_count > 0)) %>%
+  filter(Missense_any) %>%
+  dplyr::select(ID)
+
+# Filter to include only rows that have IDs with High_count > 0
+modules_with_both_2_6 <- data_cat_2_6 %>%
+  semi_join(ids_with_both_2_6, by = "ID")
+
+
+#find all possible pairs of modules where 'High_count' is greater than 0
+# and generate a new df with each row representing a unique pair of modules for each ID.
+module_pairs_for_ids_2_6 <- modules_with_both_2_6 %>%
+  group_by(ID) %>%
+  do({
+    data.frame(t(combn(unique(.$Module), 2)), stringsAsFactors = FALSE)
+  }) %>%
+  dplyr::rename(Module1 = X1, Module2 = X2) %>%
+  left_join(modules_with_both_2_6, by = c("ID", "Module1" = "Module")) %>%
+left_join(modules_with_both_2_6, by = c("ID", "Module2" = "Module"), suffix = c("_1", "_2")) %>%
+  filter(High_count_2 > 0 | High_count_1 > 0)
+
+# Count occurrences of module pairs across IDs
+module_pair_counts_2_6 <- module_pairs_for_ids_2_6 %>%
+  group_by(Module1, Module2) %>%
+  summarise(Count = n_distinct(ID), .groups = 'drop')
+
+
+# Ensure all combinations are present with at least a zero count for each category
+comparison_df <- merge(module_pair_counts_1, module_pair_counts_2_6, by = c("Module1", "Module2"), all = TRUE)
+comparison_df[is.na(comparison_df)] <- 0  # Replace NA with 0
+
+# Rename columns
+names(comparison_df)[names(comparison_df) == "Count.x"] <- "Count_1"
+names(comparison_df)[names(comparison_df) == "Count.y"] <- "Count_2_6"
+
+# Add number of people per group for totals not in counts
+comparison_df$Not_Count_1 <- sum(cohort$arrest_ontology == "1") - comparison_df$Count_1
+comparison_df$Not_Count_2_6 <- sum(cohort$arrest_ontology %in% c(2,3,4,5,6)) - comparison_df$Count_2_6
+
+# Function to perform Fisher's Exact Test for a row
+perform_fisher_test <- function(count_1, not_count_1, count_2_6, not_count_2_6) {
+  contingency_table <- matrix(c(count_1, not_count_1, count_2_6, not_count_2_6), 
+                              nrow = 2, 
+                              dimnames = list(c("In Count", "Not in Count"), c("Group_1", "Group_2_6")))
+  
+  fisher_result <- fisher.test(contingency_table)
+  
+  return(fisher_result$p.value)
+}
+
+# Apply the Fisher function to each row in the dataframe
+comparison_df$p_value <- mapply(perform_fisher_test, 
+                                comparison_df$Count_1, 
+                                comparison_df$Not_Count_1, 
+                                comparison_df$Count_2_6, 
+                                comparison_df$Not_Count_2_6)
+
+
+
+comparison_df$adjusted_p_value <- p.adjust(comparison_df$p_value, method = "bonferroni", n = length(comparison_df$p_value))
+
+# Filter significant results based on adjusted p-values
+significant_pairs <- comparison_df %>% filter(adjusted_p_value < 0.05)
+
+# Print significant module pairs
+print(significant_pairs)
+
+```
+
+```{r cars139}
+#merge the high effect count data 
+High_data <- rbind(data_cat_1, data_cat_2_6)
+
+#assign the case/control categories
+High_data <- High_data %>%
+  mutate(Category_group = case_when(
+    Category == 1 ~ "1",
+    TRUE ~ "2-6"
+  ))
+
+#assign in the module gene count data
+df_gene_counts <- data.frame(
+  Module = c("CICR", "DGC", "ICD", "Membrane_polarity", "Proteostasis", 
+             "Rasopathy", "SNS_PNS", "Z_disc", "cytokine", 
+             "fate_specification", "lysosomal_storage", "mitochondria", 
+             "nuclear_envelope", "sarcomere"),
+  Num_Genes = c(11, 7, 12, 24, 7, 17, 10, 12, 4, 11, 3, 25, 4, 16)
+)
+
+# scale the high effect date per module based on the genes in the module
+High_data_scaled <- High_data %>%
+  left_join(df_gene_counts, by = "Module")
+
+High_data_scaled <- High_data_scaled %>%
+  mutate(High_count_per_gene = High_count / Num_Genes)
+
+#compute the means
+averages_sem_scaled <- High_data_scaled %>%
+  dplyr::group_by(Module, Category_group) %>%
+  dplyr::summarize(
+    Mean = mean(High_count_per_gene, na.rm = TRUE),
+    SD = sd(High_count_per_gene, na.rm = TRUE),
+    N = n(),
+    SEM = SD / sqrt(N),
+    .groups = 'drop'
+  )
+
+#run the t-tests to compare the modules per case or control (Category_group)
+test_results <- High_data_scaled %>%
+  group_by(Module) %>%
+  do({
+    ttest <- t.test(High_count_per_gene ~ Category_group, data = .)
+    tidy(ttest)
+  }) %>%
+  ungroup()  
+
+# show t-test data
+print(test_results)
+
+#calculate averages
+averages_sem_scaled <- High_data_scaled %>%
+  dplyr::group_by(Module, Category_group) %>%
+  dplyr::summarize(
+    Mean = mean(High_count_per_gene),
+    SD = sd(High_count_per_gene),
+    N = n(),
+    SEM = SD / sqrt(N),
+    .groups = 'drop'
+  )
+
+# label function for the fill legend
+custom_fill_labels <- c("1" = "Control", "2-6" = "Case")
+
+# Plot
+High_modules_plot_scaled <- ggplot(averages_sem_scaled, aes(x = Module, y = Mean, fill = Category_group, group = Category_group)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), color = "black") +
+  geom_errorbar(aes(ymin = Mean - SEM, ymax = Mean + SEM), width = .2, position = position_dodge(.8)) +
+  scale_fill_manual(values = c("1" = "#FF6464", "2-6" = "#05618F"), labels = custom_fill_labels) +
+  labs(x = "Module", y = "Average High Count Per Gene") +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Show plot
+print(High_modules_plot_scaled)
+
+```
+
+
+```{r cars140}
+#compute the relative counts based on cohort size
+comparison_df <- comparison_df %>%
+  mutate(Relative_Counts = (Count_2_6 / (sum(cohort$arrest_ontology %in% c(2,3,4,5,6))))/(Count_1 / (sum(cohort$arrest_ontology == "1"))))
+
+#assign in the module gene count data
+df_gene_counts <- data.frame(
+  Module = c("CICR", "DGC", "ICD", "Membrane_polarity", "Proteostasis", 
+             "Rasopathy", "SNS_PNS", "Z_disc", "cytokine", 
+             "fate_specification", "lysosomal_storage", "mitochondria", 
+             "nuclear_envelope", "sarcomere"),
+  Num_Genes = c(11, 7, 12, 24, 7, 17, 10, 12, 4, 11, 3, 25, 4, 16)
+)
+significant_edges_df <- comparison_df %>%
+  filter(adjusted_p_value < 0.05)
+
+# Create an igraph object with edge attributes using filtered dataframe
+network_graph <- graph_from_data_frame(d = significant_edges_df[, c("Module1", "Module2")], directed = FALSE)
+
+# Matching Num_Genes from df_gene_counts to vertices in the network_graph
+V(network_graph)$Num_Genes <- df_gene_counts$Num_Genes[match(V(network_graph)$name, df_gene_counts$Module)]
+
+# Add edge attributes for adjusted_p_value and Relative_Counts from the filtered data frame
+E(network_graph)$adjusted_p_value <- significant_edges_df$adjusted_p_value
+E(network_graph)$Relative_Counts <- significant_edges_df$Relative_Counts
+
+
+# Plot the graph with ggraph
+HIGH_network <- ggraph(network_graph, layout = 'fr') +
+  geom_edge_link(aes(color = -log10(adjusted_p_value), edge_width = Relative_Counts), alpha = 0.8) +
+  geom_node_point(aes(size = Num_Genes), color = "Black") +
+  geom_node_text(aes(label = name), repel = TRUE, point.padding = unit(0.01, "lines")) +
+  scale_size_continuous(range = c(3, 10)) +
+  theme_graph()
+
+print(HIGH_network)
+
+```
+
+```{r cars141}
+#Filter NAs ans aggregate the data
+module_data <- module_data %>%
+  filter(!is.na(Module))
+
+module_data <- module_data %>%
+  mutate(Category_Group = ifelse(Category == 1, "Category 1", "Categories 2-6"))
+
+#count up the variants
+module_summary <- module_data %>%
+  group_by(Module, Category_Group) %>%
+  summarise(Total_HIGH_variant = sum(HIGH, na.rm = TRUE)) %>%
+  ungroup() 
+
+# First, calculate the number of genes per module
+genes_per_module <- modules %>%
+  group_by(Module) %>%
+  summarise(Num_Genes = n()) %>%
+  ungroup()
+
+# Merge this information with your module_summary data frame
+module_summary <- module_summary %>%
+  left_join(genes_per_module, by = c("Module" = "Module"))
+
+# Calculate the size relative to the number of genes per module
+module_summary <- module_summary %>%
+  mutate(Relative_Size = Total_HIGH_variant / Num_Genes)
+
+# Filter the data to only include "Categories 2-6"
+module_summary_filtered <- module_summary %>%
+  filter(Category_Group == "Categories 2-6")
+
+#order them by mean count
+module_order <- module_summary_filtered %>%
+  group_by(Module) %>%
+  summarise(Sort_Metric = mean(Total_HIGH_variant, na.rm = TRUE)) %>%
+  arrange(desc(Sort_Metric)) %>%
+  .$Module
+
+module_summary_filtered$Module <- factor(module_summary_filtered$Module, levels = module_order)
+
+# Now plot with the reordered Module
+modules_HIGH_plot <- ggplot(module_summary_filtered, aes(x = Module, y = Category_Group, size = Total_HIGH_variant, color = Relative_Size)) +
+  geom_point(shape = 15, alpha = 1) +
+  scale_size(range = c(3, 20), name = "Number of HIGHs") + 
+  scale_color_gradient(low = "Grey", high = "#05618F", name = "# of HIGHs relative to Module size") +
+  theme_minimal() +
+  labs(title = "Total HIGH by Module (Cases)",
+       x = "Module",
+       y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(modules_HIGH_plot)
+```
+
+
+
+
+Pull in uniprot data and plot PLP variants 
+```{r cars142}
+# pull down data for MYH7 (uniprot ID P12883)
+MYH7_data <- drawProteins::get_features("P12883")
+MYH7_data <- drawProteins::feature_to_dataframe(MYH7_data)
+
+# pull down data for MYBPC3 (uniprot ID Q14896)
+MYBPC3_data <- drawProteins::get_features("Q14896")
+MYBPC3_data <- drawProteins::feature_to_dataframe(MYBPC3_data)
+
+# pull down data for SCN5A (uniprot ID Q14524)
+SCN5A_data <- drawProteins::get_features("Q14524")
+SCN5A_data <- drawProteins::feature_to_dataframe(SCN5A_data)
+```
+
+
+
+```{r cars143}
+MYH7_plot <- draw_canvas(MYH7_data)
+MYH7_plot <- draw_chains(MYH7_plot, MYH7_data)
+MYH7_plot <- draw_domains(MYH7_plot, MYH7_data)
+MYH7_plot <- draw_regions(MYH7_plot, MYH7_data)
+#MYH7_plot <- draw_phospho(MYH7_plot, MYH7_data)
+
+variants <- data.frame(
+  begin = c(1712,1057,908,904,869,741,723,576,369,355),
+  y = rep(1, 10)  
+)
+
+
+# Now, add these points to your plot
+MYH7_plot <- MYH7_plot + 
+  geom_point(data = variants, aes(x = begin, y = y), color = "red", size = 3)
+
+# Adjust themes and aesthetics as needed
+MYH7_plot <- MYH7_plot + theme_bw(base_size = 14) + 
+  theme(panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.border = element_blank())
+
+MYH7_plot
+
+##################################################################################################
+MYBPC3_plot <- draw_canvas(MYBPC3_data)
+MYBPC3_plot <- draw_chains(MYBPC3_plot, MYBPC3_data)
+MYBPC3_plot <- draw_domains(MYBPC3_plot, MYBPC3_data)
+MYBPC3_plot <- draw_regions(MYBPC3_plot, MYBPC3_data)
+#MYBPC3_plot <- draw_phospho(MYBPC3_plot, MYBPC3_data)
+
+#######Note, 7 variants are not shown becasue they are splice variants
+
+variants <- data.frame(
+  begin = c(1098, 1096, 1064, 791, 542, 502, 495, 258, 219),
+  y = rep(1, 9)  
+)
+
+# Now, add these points to your plot
+MYBPC3_plot <- MYBPC3_plot + 
+  geom_point(data = variants, aes(x = begin, y = y), color = "red", size = 3)
+
+# Adjust themes and aesthetics as needed
+MYBPC3_plot <- MYBPC3_plot + theme_bw(base_size = 14) + 
+  theme(panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.border = element_blank())
+
+MYBPC3_plot
+
+##################################################################################################
+SCN5A_plot <- draw_canvas(SCN5A_data)
+SCN5A_plot <- draw_chains(SCN5A_plot, SCN5A_data)
+SCN5A_plot <- draw_domains(SCN5A_plot, SCN5A_data)
+SCN5A_plot <- draw_regions(SCN5A_plot, SCN5A_data)
+#SCN5A_plot <- draw_phospho(SCN5A_plot, SCN5A_data)
+
+#######Note, 2 variants are not shown becasue they are splice variants
+variants <- data.frame(
+  begin = c(1784,1595,1319,1316,845,828,814),
+  y = rep(1, 7)  
+)
+
+
+# Now, add these points to your plot
+SCN5A_plot <- SCN5A_plot + 
+  geom_point(data = variants, aes(x = begin, y = y), color = "red", size = 3)
+
+# Adjust themes as needed
+SCN5A_plot <- SCN5A_plot + theme_bw(base_size = 14) + 
+  theme(panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.border = element_blank())
+
+
+SCN5A_plot
+```
+
+
+
+Nonoding******************************************************************************************************************
+
+
+Pull in the file that is just the ATAC data intervals overlaid on top of the Hi-C intervals which map to the genes of interest
+```{r cars144}
+
+# Read the PC-Hi-C ATAC overlay BED file
+bed_data <- read_tsv("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/SFRN_cohort_data/noncoding/noncoding_rare/EP_ATAC_intersect_final_output_nodups.bed", col_names = FALSE, col_types = cols(
+  X1 = col_character(), # Chromosome
+  X2 = col_double(),    # Start Position
+  X3 = col_double()     # End Position
+))
+
+
+```
+
+
+
+```{r pressure1}
+
+# Calculate Interval Sizes
+bed_data$interval_size <- bed_data$X3 - bed_data$X2
+
+# Calculate the median of interval sizes
+median_interval_size <- median(bed_data$interval_size, na.rm = TRUE)
+
+# plot
+interval_size_histogram <- ggplot(bed_data, aes(x = interval_size)) +
+  geom_histogram(binwidth = 100, fill = "lightblue", color = "black") +
+  geom_vline(aes(xintercept = median_interval_size), color = "black", linetype = "dashed", size = 1) +
+  xlab("Interval Size") +
+  ylab("Frequency") +
+  ggtitle("Histogram of Interval Sizes") +
+  theme_cowplot(12)
+
+interval_size_histogram
+
+```
+
+
+
+
+```{r pressure2}
+mean(bed_data$interval_size)
+
+median(bed_data$interval_size)
+```
+
+
+
+Now pull in the ATAC data that maps to genes of interest, including the promoter fragment the ATAC data mapped to
+```{r pressure3}
+
+# Read the BED file
+bed_data <- read_tsv("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/EP_ATAC_intersect_final_output_annotated_unique.bed", col_names = c("Chromosome", "Start", "End", "Chromosome2", "GeneStart", "GeneEnd", "GeneNames"), col_types = cols(
+  Chromosome = col_character(),
+  Start = col_double(),
+  End = col_double(),
+  Chromosome2 = col_character(),
+  GeneStart = col_double(),
+  GeneEnd = col_double(),
+  GeneNames = col_character()
+))
+
+# Split the gene names in case there are multiple genes separated by semicolon
+bed_data <- bed_data %>% 
+  mutate(GeneNames = strsplit(GeneNames, ";")) %>%
+  unnest(GeneNames)
+
+# Read the gene list
+gene_list <- readLines("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/Lorenzo_panel_genes_simple.txt")
+
+# Filter bed_data to keep only rows with genes in the gene list
+bed_data <- bed_data %>%
+  filter(GeneNames %in% gene_list)
+
+# Count the number of regions mapped to each gene
+gene_count <- bed_data %>%
+  count(GeneNames)
+
+print(gene_count)
+```
+
+
+
+```{r pressure4}
+
+# Calculate the median
+median_regions <- median(gene_count$n, na.rm = TRUE)
+
+# plot
+regions_per_gene <- ggplot(gene_count, aes(x = n)) +
+  geom_histogram(binwidth = 1, fill = "#B40F20", color = "#B40F20") +
+  geom_vline(aes(xintercept = median_regions), color = "black", linetype = "dashed", size = 1) +
+  xlab("Number of Regions") +
+  ylab("Frequency") +
+  theme_cowplot(12) +
+  ggtitle("Histogram of the Distribution of Number of Regions per Gene")
+
+regions_per_gene
+```
+
+mean(gene_count)
+
+```{r pressure5}
+mean(gene_count$n)
+median(gene_count$n)
+```
+
+
+
+```{r pressure6}
+bed_data$region_size <- bed_data$End - bed_data$Start
+
+# Sum region sizes for each gene
+total_region_size_per_gene <- bed_data %>%
+  group_by(GeneNames) %>%
+  summarise(TotalRegionSize = sum(region_size))
+
+mean(total_region_size_per_gene$TotalRegionSize)
+
+median(total_region_size_per_gene$TotalRegionSize)
+```
+
+```{r pressure7}
+# Create histogram of Total Region Sizes
+ggplot(total_region_size_per_gene, aes(x = TotalRegionSize)) +
+  geom_histogram(binwidth = 1000, fill = "blue", color = "black") +
+  xlab("Total Region Size") +
+  ylab("Frequency") +
+  ggtitle("Histogram of Total Region Sizes per Gene")
+```
+
+```{r pressure8}
+gene_list <- unique(bed_data$GeneNames)
+
+# Select hg19 from Ensembl 
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl", host = "grch37.ensembl.org")
+
+# Get TSS positions along with strand information
+tss_info <- getBM(attributes = c('hgnc_symbol', 'chromosome_name', 'transcription_start_site', 'strand'),
+                  filters = 'hgnc_symbol',
+                  values = gene_list,
+                  mart = ensembl)
+```
+
+
+```{r pressure9}
+# Make function to select the most upstream TSS based on strand
+select_upstream_tss <- function(df) {
+  if (all(df$strand == 1)) {
+    return(data.frame(transcription_start_site = min(df$transcription_start_site)))  # Forward strand
+  } else {
+    return(data.frame(transcription_start_site = max(df$transcription_start_site)))  # Reverse strand
+  }
+}
+
+# Apply the function to each group of genes
+tss_upstream <- tss_info %>%
+  group_by(hgnc_symbol) %>%
+  do(select_upstream_tss(.))
+
+
+# Merge bed_data with tss_upstream on gene names
+merged_data <- merge(bed_data, tss_upstream, by.x = "GeneNames", by.y = "hgnc_symbol")
+
+# Calculate the midpoint (peak center) of each interval
+merged_data$Center <- (merged_data$Start + merged_data$End) / 2
+
+# Calculate the distance
+merged_data$DistanceToTSS <- abs(merged_data$Center - merged_data$transcription_start_site)
+
+```
+
+Distance to TSS
+
+```{r pressure10}
+mean(merged_data$DistanceToTSS)
+
+median(merged_data$DistanceToTSS)
+
+```
+
+```{r pressure11}
+# Create a histogram
+median_distance <- median(merged_data$DistanceToTSS, na.rm = TRUE)
+
+dist_tss <- ggplot(merged_data, aes(x = DistanceToTSS)) +
+  geom_histogram(binwidth = 0.1, fill = "#FFB3BA", color = "black") +
+  geom_vline(aes(xintercept = median_distance), color = "black", linetype = "dashed", size = 1) +
+  xlab("Distance to TSS (bp)") +
+  ylab("Frequency") +
+  theme_cowplot(12) +
+  ggtitle("Histogram of Distances to Transcription Start Sites (TSS)") +
+  scale_x_log10(breaks = 10^(0:6) * 10000, labels = scales::comma)
+
+dist_tss
+```
+
+
+
+
+```{r pressure12}
+
+# Retrieve TSS information for all genes along with HGNC symbols
+all_tss_info <- getBM(
+  attributes = c('hgnc_symbol', 'chromosome_name', 'transcription_start_site', 'strand'),
+  mart = ensembl
+)
+
+# Filter out rows where hgnc_symbol is blank
+filtered_all_tss_info <- all_tss_info %>%
+  filter(hgnc_symbol != "")
+
+```
+
+
+
+See if the peak is closer to another TSS than the contacted one!
+
+```{r pressure13}
+# Function to select the most upstream TSS along with chromosome information based on strand, just like before, but for all genes
+select_upstream_tss <- function(df) {
+  if (nrow(df) == 0) {
+    return(data.frame(chromosome_name = NA, transcription_start_site = NA)) # Return NA if there are no rows
+  }
+  if (all(df$strand == 1)) {
+    # Forward strand
+    tss <- min(df$transcription_start_site, na.rm = TRUE)
+  } else {
+    # Reverse strand
+    tss <- max(df$transcription_start_site, na.rm = TRUE)
+  }
+  chromosome <- df$chromosome_name[which.min(abs(df$transcription_start_site - tss))]
+  return(data.frame(chromosome_name = chromosome, transcription_start_site = tss))
+}
+
+# Apply the function to each group of genes
+all_tss_upstream <- filtered_all_tss_info %>%
+  group_by(hgnc_symbol) %>%
+  do(select_upstream_tss(.)) %>%
+  ungroup() 
+
+# Prepend 'chr' to chromosome names
+all_tss_upstream$chromosome_name <- paste0("chr", all_tss_upstream$chromosome_name)
+
+
+```
+
+
+
+
+```{r pressure14}
+# Create GRanges object for all_tss_upstream
+tss_ranges <- GRanges(
+  seqnames = all_tss_upstream$chromosome_name,
+  ranges = IRanges(start = all_tss_upstream$transcription_start_site, end = all_tss_upstream$transcription_start_site)
+)
+
+# Create GRanges object for merged_data
+merged_data_ranges <- GRanges(
+  seqnames = merged_data$Chromosome,
+  ranges = IRanges(start = merged_data$Center, end = merged_data$Center)
+)
+
+# Find the nearest TSS for each midpoint (peak center)
+nearest_hits <- nearest(merged_data_ranges, tss_ranges)
+
+# Extract the closest TSS information
+closest_tss_info <- all_tss_upstream[nearest_hits, ]
+
+# Add closest TSS information to merged_data
+merged_data$closest_gene <- closest_tss_info$hgnc_symbol
+merged_data$closest_tss <- closest_tss_info$transcription_start_site
+merged_data$closest_tss_chromosome <- closest_tss_info$chromosome_name
+
+# Calculate distance to closest TSS
+merged_data$distance_to_closest_tss <- abs(merged_data$Center - merged_data$closest_tss)
+```
+
+
+```{r pressure15}
+# Compare GeneNames with closest_gene and append
+merged_data$gene_match <- merged_data$GeneNames == merged_data$closest_gene
+```
+
+
+
+```{r pressure16}
+# Calculate the fraction of matches
+fraction_match <- sum(merged_data$gene_match, na.rm = TRUE) / nrow(merged_data)
+
+fraction_mismatch <- 1-(sum(merged_data$gene_match, na.rm = TRUE) / nrow(merged_data))
+
+# Print the fraction
+print(100*fraction_match)
+print(100*fraction_mismatch)
+
+
+```
+
+
+Lets see which genes have regions mapped to them that are closer to other TSSs
+```{r pressure17}
+# Aggregate data by GeneNames
+gene_summary <- merged_data %>%
+  dplyr::group_by(GeneNames) %>%
+  dplyr::summarize(
+    any_true = any(gene_match, na.rm = TRUE),
+    any_false = any(!gene_match, na.rm = TRUE),
+    all_true = all(gene_match, na.rm = TRUE),
+    all_false = all(!gene_match, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Adjusted calculations to include 8 missing genes
+adjusted_denominator <- nrow(gene_summary) + 16
+
+percent_any_true <- sum(gene_summary$any_true) / adjusted_denominator * 100
+number_any_true <- sum(gene_summary$any_true)
+percent_any_false <- sum(gene_summary$any_false) / adjusted_denominator * 100
+number_any_false <- sum(gene_summary$any_false) 
+percent_all_true <- sum(gene_summary$all_true) / adjusted_denominator * 100
+number_all_true <- sum(gene_summary$all_true) 
+percent_all_false <- sum(gene_summary$all_false) / adjusted_denominator * 100
+number_all_false <- sum(gene_summary$all_false) 
+percent_both_true_false <- sum(gene_summary$any_true & gene_summary$any_false) / adjusted_denominator * 100
+number_both_true_false <- sum(gene_summary$any_true & gene_summary$any_false) 
+
+# Print the results
+cat("Total genes in panel", 363 ,"\n")
+cat("Genes with no ATAC peaks:", 100*(16/363),"%, ",16,"\n")
+cat("Genes with at least one TRUE:", percent_any_true,"%, ", number_any_true,"\n")
+cat("Genes with at least one FALSE:", percent_any_false,"%, ", number_any_false,"\n")
+cat("Genes with only TRUE:", percent_all_true,"%, ", number_all_true,"\n")
+cat("Genes with only FALSE:", percent_all_false,"%, ", number_all_false,"\n")
+cat("Genes with both TRUE and FALSE:", percent_both_true_false,"%, ", number_both_true_false,"\n")
+
+
+
+```
+
+
+
+input the count data
+
+```{r cars201}
+noncoding_stats <- read.table("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/noncoding_frequency_by_individual_for_manuscript_fixed.txt", header = TRUE, sep = "\t")
+```
+
+
+Categorize the data
+```{r cars2000}
+categorized_noncoding_stats <- noncoding_stats %>%
+  mutate(Category_Group = case_when(
+    Category == 1 ~ "Control",
+    #Category %in% 2:3 ~ "2-3",
+    Category %in% 2:6 ~ "Case"
+  ))
+```
+
+
+Aggregate and clean
+```{r cars203}
+#clean it up to remove inadvertent NAs or infs
+categorized_noncoding_stats <- categorized_noncoding_stats %>%
+  dplyr::select(-ID, -Category) %>% 
+  na.omit() %>% 
+  dplyr::filter_all(all_vars(!is.infinite(.))) 
+
+# Aggregate the Data to compute mean and standard deviation for each numeric column
+collapsed_noncoding_stats <- categorized_noncoding_stats %>%
+  group_by(Category_Group) %>%
+  summarise(across(where(is.numeric), list(mean = ~mean(., na.rm = TRUE), 
+                                           std = ~sd(., na.rm = TRUE))))
+
+# Remove rows with NA values
+collapsed_noncoding_stats <- na.omit(collapsed_noncoding_stats)
+
+```
+
+Perform ANOVA with Tukey
+```{r cars206}
+
+# List of variables to analyze
+noncoding_variables_to_analyze <- c("variant_count", "Epilepsy_gnomAD.0.001","Epilepsy_ultrarare","Cardiomyopathy_gnomAD.0.001","Cardiomyopathy_ultrarare")
+
+# Define the permutation function
+permutation_test <- function(data, var, group_var, num_permutations = 10000) {
+  
+  # Calculate the observed difference in means between the two groups
+  observed_stat <- abs(mean(data[[var]][data[[group_var]] == "Case"]) - 
+                       mean(data[[var]][data[[group_var]] == "Control"]))
+  
+  # Create an empty vector to store the permutation statistics
+  perm_stats <- numeric(num_permutations)
+  
+  # Perform the permutations
+  for (i in 1:num_permutations) {
+    # Randomly shuffle the group labels
+    permuted_group <- sample(data[[group_var]])
+    
+    # Calculate the difference in means for the permuted data
+    permuted_stat <- abs(mean(data[[var]][permuted_group == "Case"]) - 
+                         mean(data[[var]][permuted_group == "Control"]))
+    
+    # Store the permuted statistic
+    perm_stats[i] <- permuted_stat
+  }
+  
+  # Calculate the p-value (proportion of permuted stats >= observed stat)
+  p_value <- mean(perm_stats >= observed_stat)
+  
+  return(list(observed_stat = observed_stat, perm_stats = perm_stats, p_value = p_value))
+}
+
+# Initialize a dataframe to store p-values for each variable
+p_value_results <- data.frame(Variable = character(), Observed_Stat = numeric(), p_value = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each variable and perform the permutation test
+for (var in noncoding_variables_to_analyze) {
+  # Run the permutation test
+  test_result <- permutation_test(categorized_noncoding_stats, var, "Category_Group")
+  
+  # Extract the permuted statistics, observed statistic, and p-value
+  perm_stats <- test_result$perm_stats
+  observed_stat <- test_result$observed_stat
+  p_value <- test_result$p_value
+  
+  # Store the p-value and observed statistic in the dataframe
+  p_value_results <- rbind(p_value_results, data.frame(Variable = var, 
+                                                       Observed_Stat = observed_stat, 
+                                                       p_value = p_value))
+  
+  # Create a data frame for plotting the permutation distribution
+  perm_df <- data.frame(perm_stats = perm_stats)
+  
+  # Plot the permutation distribution with the observed statistic marked and p-value
+  p <- ggplot(perm_df, aes(x = perm_stats)) +
+    geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+    geom_vline(aes(xintercept = observed_stat), color = "red", linetype = "dashed", size = 1) +
+    labs(title = paste("Permutation Test for", var),
+         x = "Permuted Statistic",
+         y = "Frequency",
+         subtitle = paste("Observed Statistic =", round(observed_stat, 4), 
+                          "| P-value =", format(p_value, digits = 4))) +  # Add p-value to subtitle
+    theme_minimal()
+  
+  # Print the plot
+  print(p)
+}
+
+# Print the table of p-values
+print("P-value Results for All Variables:")
+print(p_value_results)
+
+
+```
+
+
+
+Create the Function to plot each column as a ratio to the means from Group 1
+
+```{r cars207}
+
+# Function to plot each column as a ratio to the means from Group 1
+plot_column_ratio <- function(data, col_name) {
+  # Calculate the mean and standard deviation for Group 1
+  group1_mean <- mean(data[data$Category_Group == "Control", col_name], na.rm = TRUE)
+  group1_sd <- sd(data[data$Category_Group == "Control", col_name], na.rm = TRUE)
+  
+  # Calculate the ratio for each group relative to Group 1
+  data_summary <- data %>%
+  group_by(Category_Group) %>%
+  summarise(mean_value = mean(.data[[col_name]], na.rm = TRUE),
+            sd_value = sd(.data[[col_name]], na.rm = TRUE), 
+            n = n()) %>%
+  mutate(ratio = mean_value / group1_mean,
+         sem_value = sd_value / sqrt(n), #  SEM calculation
+         sem_ratio = sem_value / group1_mean, # SEM ratio 
+         ci_lower = ratio - (1.96 * sem_ratio), # Lower bound of the CI
+         ci_upper = ratio + (1.96 * sem_ratio)) # Upper bound of the CI
+
+  return(list(summary_data = data_summary))
+}
+```
+
+
+```{r cars208}
+# List of all columns to plot
+columns_to_plot <- setdiff(names(categorized_noncoding_stats), c("ID", "Category", "Category_Group"))
+
+
+# Initialize an empty dataframe to store summary data
+combined_noncoding_stats_summary_df <- data.frame(Category_Group = character(), col_name = character(), mean = 
+                                                    numeric(), std = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each column and plot relative to Category_Group1
+for (col in columns_to_plot) {
+  plot_data <- plot_column_ratio(categorized_noncoding_stats, col)
+  # Append summary data to combined_noncoding_stats_summary_df
+  combined_noncoding_stats_summary_df <- bind_rows(combined_noncoding_stats_summary_df, mutate(plot_data$summary_data, col_name = col))
+}
+
+
+
+
+```
+
+
+```{r cars209}
+# Subset the data for the specified variables
+selected_noncoding_data <- combined_noncoding_stats_summary_df %>%
+  filter(col_name %in% c(
+                       "variant_count",
+                       "Cardiomyopathy_gnomAD.0.001",
+                        "Epilepsy_gnomAD.0.001",
+                        "Cardiomyopathy_ultrarare",
+                       "Epilepsy_ultrarare"),
+         Category_Group != "Control") 
+
+
+# Define the specific order for noncoding variants
+levels_order <- c(
+                      "variant_count",
+                      "Epilepsy_ultrarare",
+                      "Epilepsy_gnomAD.0.001",
+                      "Cardiomyopathy_ultrarare",
+                      "Cardiomyopathy_gnomAD.0.001"
+                       )
+
+# Factorize the 'col_name' column with the specified order
+selected_noncoding_data$col_name <- factor(selected_noncoding_data$col_name, levels = levels_order)
+
+# Plot 
+noncoding_stats_plot <- ggplot(selected_noncoding_data, aes(y = col_name, x = ratio, color = Category_Group)) +
+  geom_point(position = position_dodge(width = 1), size = 3) +
+  geom_errorbar(aes(xmin = ratio - sem_ratio, xmax = ratio + sem_ratio), position = position_dodge(width = 0.5), width = 0.5) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  scale_color_manual(values = "#FF6464") +
+  labs(title = "Ratio Compared to Group 1 +/-SEM",
+       y = "Variant",
+       x = "Ratio to Group 1 Mean",
+       color = "Category Group") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 8), 
+        axis.text.y = element_text(size = 8, hjust = 1),
+        axis.title.x = element_text(size = 8), 
+        axis.title.y = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8),
+        plot.title = element_text(size = 8, hjust = 0.5),
+        plot.subtitle = element_text(size = 8),
+        plot.caption = element_text(size = 8),
+        plot.margin = margin(15, 15, 15, 15)) +
+  scale_x_continuous(limits = c(0.75, 2))
+
+
+print(noncoding_stats_plot)
+
+```
+
+
+
+Input the data (change to your path)
+
+```{r cars310}
+# Pull in the gene data
+gene_data_noncoding <- read.csv("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/individual_noncoding_variants_by_gene_for_manuscript_fixed.csv")
+
+# Read the cohort data
+cohort <- read.table("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/SFRN_cohort_for_manuscript_fixed.txt", sep = "\t", header = TRUE)
+
+# add the arrest category to each
+gene_data_noncoding$Category <- cohort$arrest_ontology[match(gene_data_noncoding$ID, cohort$CGM_id)]
+
+#filter for discovery only
+gene_data_noncoding_discovery <- gene_data_noncoding %>%
+  filter(Set == "Discovery")
+
+```
+
+
+Summarize the data by GENE, counting the number of variants for each gene
+Filter for Category > 1 and then group and summarize
+
+```{r cars311}
+variants_per_gene_Cat_2_6 <- gene_data_noncoding_discovery %>%
+  filter(Category > 1) %>%
+  group_by(GENE) %>%
+  summarise(
+    noncoding_ultrarare = sum(noncoding_ultrarare, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Print the result
+print(variants_per_gene_Cat_2_6)
+
+```
+
+
+
+Filter for Category == 1 and then group and summarize
+
+```{r cars312}
+
+variants_per_gene_Cat_1 <- gene_data_noncoding_discovery %>%
+  filter(Category == 1) %>%
+  group_by(GENE) %>%
+  summarise(
+    noncoding_ultrarare = sum(noncoding_ultrarare, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Print the result
+print(variants_per_gene_Cat_1)
+
+
+```
+
+
+Append panel source to the gene_data
+```{r cars315}
+# Ensure that the 'GENE' column in 'gene_data_noncoding_discovery' and 'Gene' in 'all_genes' are character type
+gene_data_noncoding_discovery$GENE <- as.character(gene_data_noncoding_discovery$GENE)
+all_genes$Gene <- as.character(all_genes$Gene)
+
+# Find the index of each gene in 'all_genes'
+# Then, use this index to assign the corresponding 'Source' to a new column in 'gene_data'
+gene_data_noncoding_discovery$Source <- all_genes$Source[match(gene_data_noncoding_discovery$GENE, all_genes$Gene)]
+
+# Now, 'gene_data' will have a new column 'Source' with the source of each gene
+# based on the lookup from 'all_genes'
+
+# View the first few rows to verify the new 'Source' has been added
+head(gene_data_noncoding_discovery)
+
+```
+
+Add the source to the category 1 variants list
+
+```{r cars316}
+variants_per_gene_Cat_1$Source <- all_genes$Source[match(variants_per_gene_Cat_1$GENE, all_genes$Gene)]
+
+head(variants_per_gene_Cat_1)
+```
+
+
+Add the source to the category 2-6 variants list
+```{r cars317}
+variants_per_gene_Cat_2_6$Source <- all_genes$Source[match(variants_per_gene_Cat_2_6$GENE, all_genes$Gene)]
+
+head(variants_per_gene_Cat_2_6)
+```
+
+combine the variants together now
+```{r cars318}
+
+# Add a new column to indicate the category
+variants_per_gene_Cat_1 <- variants_per_gene_Cat_1 %>%
+  mutate(Category = "1")  
+
+# Add a new column to indicate the category range
+variants_per_gene_Cat_2_6 <- variants_per_gene_Cat_2_6 %>%
+  mutate(Category = "2-6")  
+
+# Combine the two datasets
+combined_variants <- bind_rows(variants_per_gene_Cat_1, variants_per_gene_Cat_2_6)
+
+# Print the combined dataset
+print(combined_variants)
+```
+
+
+```{r cars319}
+# Filter dataset where noncoding_ultrarare > 0
+noncoding_ultrarare_data <- combined_variants %>%
+  filter(noncoding_ultrarare > 0) %>%
+  filter(!is.na(Source))
+
+
+# Label function for noncoding_ultrarare plot
+custom_labeller_noncoding <- function(variable, value) {
+  if (variable == "Category") {
+    return(ifelse(value == "1", "Control", "Case"))
+  }
+  return(value)
+}
+
+# Create the noncoding_ultrarare plot
+noncoding_ultrarare_plot <- ggplot(noncoding_ultrarare_data, aes(x = GENE, y = Category, fill = noncoding_ultrarare)) +
+  geom_tile() + 
+  scale_fill_gradientn(colors = c("#3C8C78", "#dcb43c", "#ae7e46"), 
+                       values = scales::rescale(c(0, 0.5, 1))) + 
+  facet_wrap(~ Source, scales = "free_x", ncol = 1) + 
+  labs(title = "Noncoding Ultrarare Heatmap",
+       x = "Gene",
+       y = "Category",
+       fill = "Count") +
+  theme_cowplot(12) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        strip.background = element_blank(), 
+        strip.placement = "outside") +
+  scale_y_discrete(labels = function(x) custom_labeller_noncoding("Category", x))
+
+# Print the plot
+print(noncoding_ultrarare_plot)
+
+```
+
+
+
+```{r cars3224240}
+# gnomAD_data pLI constraint data
+gnomad_data <- fread("/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/gnomad.v2.1.1.lof_metrics.by_gene.txt")
+
+# Function to fetch pLI
+get_pLI <- function(gene_symbol, gnomad_data) {
+  result <- gnomad_data[gene == gene_symbol, .(gene, pLI)]
+  if (nrow(result) == 0) {
+    stop("Gene not found in gnomAD data.")
+  }
+  return(result)
+}
+
+# Initialize an empty data frame to store the results
+final_merged_data <- data.frame(GENE = character(), p_value = numeric(), pLI = numeric(), Source = character(), ratio = numeric(), stringsAsFactors = FALSE)
+
+# Process each panel "Source" group separately
+for (source in unique(noncoding_ultrarare_data$Source)) {
+  
+  # Filter data by panel "Source"
+  source_data <- noncoding_ultrarare_data %>% filter(Source == source)
+  
+  # Extract unique genes for this Source
+  unique_genes <- unique(source_data$GENE)
+  
+  # Create a data frame to store pLI values
+  pli_values <- data.frame(GENE = character(), pLI = numeric(), stringsAsFactors = FALSE)
+  
+  # Fetch pLI values for each gene
+  for (gene in unique_genes) {
+    try({
+      pli_value <- get_pLI(gene, gnomad_data)
+      pli_values <- rbind(pli_values, data.frame(GENE = gene, pLI = pli_value$pLI, stringsAsFactors = FALSE))
+    }, silent = TRUE)
+  }
+  
+  # Compute p-values and ratios for each gene 
+  p_values <- source_data %>%
+    group_by(GENE) %>%
+    summarise(
+      p_value = {
+        control_count <- sum(noncoding_ultrarare[Category == 1], na.rm = TRUE)
+        case_count <- sum(noncoding_ultrarare[Category == "2-6"], na.rm = TRUE)
+        total_count <- sum(noncoding_ultrarare, na.rm = TRUE)
+        expected_control <- total_count * (537 / (537 + 506))
+        expected_case <- total_count * (506 / (537 + 506))
+        chisq_stat <- ((control_count - expected_control)^2 / expected_control) + 
+                      ((case_count - expected_case)^2 / expected_case)
+        pchisq(chisq_stat, df = 1, lower.tail = FALSE)
+      },
+      ratio = {
+        control_count <- sum(noncoding_ultrarare[Category == 1], na.rm = TRUE)
+        case_count <- sum(noncoding_ultrarare[Category == "2-6"], na.rm = TRUE)
+        if (is.na(control_count) | is.na(case_count) | control_count == 0) {
+          NA
+        } else {
+          (case_count/506) / (control_count/537)
+        }
+      }
+    )
+  
+  # Merge with pLI values
+  merged_data <- merge(p_values, pli_values, by = "GENE")
+  merged_data$Source <- source
+  
+  # Append to the final data frame
+  final_merged_data <- rbind(final_merged_data, merged_data)
+}
+
+# Calculate the Bonferroni correction cutoff
+num_tests <- nrow(final_merged_data)
+bonferroni_cutoff <- 0.05 / num_tests
+
+# Filter for Bonferroni corrected p-values
+bonferroni_filtered_data <- final_merged_data %>%
+  filter(p_value < bonferroni_cutoff)
+
+# Filter for the top 10 lowest p-values within each source group
+top10_labels <- bonferroni_filtered_data %>%
+  group_by(Source) %>%
+  slice_min(order_by = p_value, n = 10) %>%
+  ungroup()
+
+# Plot
+reg_variant_plot <- ggplot(bonferroni_filtered_data, aes(y = -log10(p_value), x = pLI, color = ratio)) +
+  geom_point() +
+  geom_text(data = top10_labels, aes(label = GENE), hjust = 0.5, vjust = -0.5) +
+  scale_color_gradient(low = "#3C8C78", high = "#dcb43c", na.value = "grey") +
+  labs(title = paste("P-Values of Noncoding Ultrarare Variants vs. pLI by Source (Bonferroni, p <", format(bonferroni_cutoff, digits = 2), ")"),
+       x = "pLI",
+       y = "-log10(p-value)",
+       color = "Ratio\n(Categories 2-6 / Category 1)") +
+  facet_wrap(~ Source) +
+  theme_cowplot(12)
+
+# Print the plot
+print(reg_variant_plot)
+```
+
+
+
+
+
+```{r cars320}
+motif_data <- data.frame(
+  TranscriptionFactor = c("IRF4", "NFY", "NKX2.5", "PRDM1", "SMAD2", "ESRRA", "NFKB","ASCL1"),
+  PValue = c(1.00E-23, 1.00E-19, 1.00E-18, 1.00E-17, 1.00E-17, 1.00E-17, 1.00E-15, 1.00E-13)
+)
+
+# Create the plot
+motif_plot <- ggplot(motif_data, aes(y = TranscriptionFactor, x = -log10(PValue))) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Transcription Factor P-values",
+       y = "Transcription Factor",
+       x = "-log10(P-value)") +
+    theme_cowplot(12)
+
+motif_plot
+```
+
+
+
+
+
+
+
+Combined******************************************************************************************************************
+
+
+
+```{r cars320}
+# Read the cohort data
+total_data <- read.table('/Users/tmt6052/Library/CloudStorage/OneDrive-NorthwesternUniversity/SFRN_paper_items/R_analysis/final_for_paper/combined_data_for_manuscript_fixed_NEW.txt', header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+
+
+combined_data <- total_data %>% filter(Set =="Discovery") 
+
+replication_data <- total_data %>%  filter(Set =="Replication") 
+```
+
+
+Categorize the Data based on original categories and arrest status
+
+```{r cars321}
+#Clump by category
+categorized_combined_data <- combined_data %>%
+  mutate(Category = case_when(
+    arrest_group == 1 ~ "Control",
+    arrest_group %in% 2:6 ~ "zCase"
+  )) %>%
+  filter(!is.na(Category))
+
+#Convert Category to a factor
+categorized_combined_data$Category <- as.factor(categorized_combined_data$Category)
+
+############################ ############## ############## replication
+#Clump replication by category z used for formatting reasons I am too lazy to fix
+categorized_replication_data <- replication_data %>%
+  mutate(Category = case_when(
+    arrest_group == 1 ~ "Control",
+    arrest_group %in% 2:6 ~ "zCase"
+  )) %>%
+  filter(!is.na(Category))
+
+# Convert Category to a factor
+categorized_replication_data$Category <- as.factor(categorized_replication_data$Category)
+
+
+```
+
+
+Collapse the rare vars
+
+```{r cars323}
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(Epilepsy_rare = (Epilepsy_missense_variant_0.01 + Epilepsy_missense_variant_0.001),
+  Epilepsy_ultrarare = (Epilepsy_missense_variant_0.00001 + Epilepsy_missense_singleton))
+
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(Epilepsy_null = (Epilepsy_start_lost + Epilepsy_stop_gained))
+
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(Cardiomyopathy_rare = (Cardiomyopathy_missense_variant_0.01 + Cardiomyopathy_missense_variant_0.001),
+  Cardiomyopathy_ultrarare = (Cardiomyopathy_missense_variant_0.00001 + Cardiomyopathy_missense_singleton))
+
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(Cardiomyopathy_null = (Cardiomyopathy_start_lost + Cardiomyopathy_stop_gained))
+
+categorized_combined_data <- categorized_combined_data %>% 
+  mutate(Epilepsy_noncoding_rare = (Epilepsy_noncoding_gnomad_0.001 + Epilepsy_noncoding_cohort_0.01 + Epilepsy_noncoding_cohort_singleton))
+         
+categorized_combined_data <- categorized_combined_data %>% 
+  mutate(Cardiomyopathy_noncoding_rare = (Cardiomyopathy_noncoding_gnomad_0.001 + Cardiomyopathy_noncoding_cohort_0.01 + Cardiomyopathy_noncoding_cohort_singleton))
+
+
+############################ ############## ############## replication
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(Epilepsy_rare = (Epilepsy_missense_variant_0.01 + Epilepsy_missense_variant_0.001),
+  Epilepsy_ultrarare = (Epilepsy_missense_variant_0.00001 + Epilepsy_missense_singleton))
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(Epilepsy_null = (Epilepsy_start_lost + Epilepsy_stop_gained))
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(Cardiomyopathy_rare = (Cardiomyopathy_missense_variant_0.01 + Cardiomyopathy_missense_variant_0.001),
+  Cardiomyopathy_ultrarare = (Cardiomyopathy_missense_variant_0.00001 + Cardiomyopathy_missense_singleton))
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(Cardiomyopathy_null = (Cardiomyopathy_start_lost + Cardiomyopathy_stop_gained))
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(Epilepsy_noncoding_rare = (Epilepsy_noncoding_gnomad_0.001 + Epilepsy_noncoding_cohort_0.01 + Epilepsy_noncoding_cohort_singleton))
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(Cardiomyopathy_noncoding_rare = (Cardiomyopathy_noncoding_gnomad_0.001 + Cardiomyopathy_noncoding_cohort_0.01 + Cardiomyopathy_noncoding_cohort_singleton))
+
+```
+
+
+
+Perform multivariate Logistic Regression on everything
+
+```{r cars24}
+model <- glm(Category ~ Normalized_Heart_rate + Normalized_PR_interval + Normalized_QTc + Normalized_BP + Normalized_QRS + Normalized_LVEF + Normalized_LVESV + Normalized_SVI + Normalized_Afib + Normalized_LVEDVI + Normalized_SV + Epilepsy_rare + Epilepsy_ultrarare + Cardiomyopathy_rare + Cardiomyopathy_ultrarare  + PLP_Epilepsy + PLP_Cardiomyopathy + Cardiomyopathy_noncoding_rare  + Epilepsy_noncoding_rare + Cardiomyopathy_null + Epilepsy_null, 
+             data = categorized_combined_data, family = binomial())
+
+model
+
+```
+
+
+Compute the scores
+```{r cars25}
+# tell it how to make the scores
+scores <- predict(model, type = "link")
+
+scores_replication <- predict(model, newdata = categorized_replication_data,  type = "link")
+
+# Add scores to the dataframes
+categorized_combined_data$scores <- scores
+categorized_replication_data$scores_replication <- scores_replication
+
+```
+
+
+Perform multivariate Logistic Regressions based only on the input paramaters, and subsets
+
+```{r cars26}
+model_cardiomyopathy_rare <- glm(Category ~ PLP_Cardiomyopathy + Cardiomyopathy_rare + Cardiomyopathy_ultrarare + Cardiomyopathy_null, data = categorized_combined_data, family = binomial())
+
+model_epilepsy_rare <- glm(Category ~ PLP_Epilepsy + Epilepsy_rare + Epilepsy_ultrarare + Epilepsy_null, data = categorized_combined_data, family = binomial())
+
+model_noncoding_rare <- glm(Category ~ Epilepsy_noncoding_rare + Cardiomyopathy_noncoding_rare, data = categorized_combined_data, family = binomial())
+
+model_common <- glm(Category ~ Normalized_Heart_rate + Normalized_PR_interval + Normalized_QTc + Normalized_BP + Normalized_QRS + Normalized_LVEF + Normalized_LVESV + Normalized_SVI + Normalized_Afib + Normalized_LVEDVI + Normalized_SV, data = categorized_combined_data, family = binomial())
+
+model_coding_rare <- glm(Category ~ PLP_Cardiomyopathy + Cardiomyopathy_rare + Cardiomyopathy_ultrarare + PLP_Epilepsy + Epilepsy_rare + Epilepsy_ultrarare + Cardiomyopathy_null + Epilepsy_null, data = categorized_combined_data, family = binomial())
+
+model_epilepsy_and_common <- glm(Category ~ PLP_Epilepsy + Epilepsy_rare + Epilepsy_ultrarare + Epilepsy_null + Normalized_Heart_rate + Normalized_PR_interval + Normalized_QTc + Normalized_BP + Normalized_QRS + Normalized_LVEF + Normalized_LVESV + Normalized_SVI + Normalized_Afib + Normalized_LVEDVI + Normalized_SV, data = categorized_combined_data, family = binomial())
+
+model_cardiac_and_common <- glm(Category ~ PLP_Cardiomyopathy + Cardiomyopathy_rare + Cardiomyopathy_ultrarare + Cardiomyopathy_null + Normalized_Heart_rate + Normalized_PR_interval + Normalized_QTc + Normalized_BP + Normalized_QRS + Normalized_LVEF + Normalized_LVESV + Normalized_SVI + Normalized_Afib + Normalized_LVEDVI + Normalized_SV, data = categorized_combined_data, family = binomial())
+
+model_common_and_coding <- glm(Category ~ Normalized_Heart_rate + Normalized_PR_interval + Normalized_QTc + Normalized_BP + Normalized_QRS + Normalized_LVEF + Normalized_LVESV + Normalized_SVI + Normalized_Afib + Normalized_LVEDVI + Normalized_SV + Epilepsy_rare + Epilepsy_ultrarare + Cardiomyopathy_rare + Cardiomyopathy_ultrarare  + PLP_Epilepsy + PLP_Cardiomyopathy + Cardiomyopathy_null + Epilepsy_null, 
+             data = categorized_combined_data, family = binomial())
+```
+
+
+
+
+Compute the rest of the scores and determine rank-based quintiles for all scores
+
+```{r cars27}
+categorized_combined_data$cardiac_variant_score <- predict(model_cardiomyopathy_rare, type = "link")
+categorized_combined_data$epilepsy_variant_score <- predict(model_epilepsy_rare, type = "link")
+categorized_combined_data$noncoding_variant_score <- predict(model_noncoding_rare, type = "link")
+categorized_combined_data$common_variant_score <- predict(model_common, type = "link")
+categorized_combined_data$common_and_coding_score <- predict(model_common_and_coding, type = "link")
+categorized_combined_data$coding_rare_score <- predict(model_coding_rare, type = "link")
+categorized_combined_data$epilepsy_and_common_score <- predict(model_epilepsy_and_common, type = "link")
+categorized_combined_data$cardiac_and_common_score <- predict(model_cardiac_and_common, type = "link")
+
+
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(
+    rank = rank(scores, ties.method = "first"),
+    score_quintiles = ceiling(rank / (n() / 5)),
+    rank_cardiac = rank(cardiac_variant_score, ties.method = "first"),
+    cardiac_score_quintiles = ceiling(rank_cardiac / (n() / 5)),
+    rank_epilepsy = rank(epilepsy_variant_score, ties.method = "first"),
+    epilepsy_score_quintiles = ceiling(rank_epilepsy / (n() / 5)),
+    rank_noncoding = rank(noncoding_variant_score, ties.method = "first"),
+    noncoding_score_quintiles = ceiling(rank_noncoding / (n() / 5)),
+    rank_common = rank(common_variant_score, ties.method = "first"),
+    common_score_quintiles = ceiling(rank_common / (n() / 5)),
+    rank_common_and_coding = rank(common_and_coding_score, ties.method = "first"),
+    common_and_coding_score_quintiles = ceiling(rank_common_and_coding / (n() / 5)),
+    rank_model_coding_rare = rank(coding_rare_score, ties.method = "first"),
+    coding_rare_score_quintiles = ceiling(rank_model_coding_rare / (n() / 5)),
+    rank_epilepsy_and_common = rank(epilepsy_and_common_score, ties.method = "first"),
+    epilepsy_and_common_score_quintiles = ceiling(rank_epilepsy_and_common / (n() / 5)),
+    rank_cardiac_and_common = rank(cardiac_and_common_score, ties.method = "first"),
+    cardiac_and_common_score_quintiles = ceiling(rank_cardiac_and_common / (n() / 5))
+  )
+
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(
+    probability = plogis(scores),
+    cardiac_probability = plogis(cardiac_variant_score),
+    epilepsy_probability = plogis(epilepsy_variant_score),
+    noncoding_probability = plogis(noncoding_variant_score),
+    common_probability = plogis(common_variant_score),
+    common_and_coding_probability = plogis(common_and_coding_score),
+    coding_rare_probability = plogis(coding_rare_score),
+    epilepsy_and_common_probability = plogis(epilepsy_and_common_score),
+    cardiac_and_common_probability = plogis(cardiac_and_common_score),
+  )
+
+
+# Function to calculate odds ratio and CI
+calculate_odds_ratios <- function(data, category_column, quintile_column) {
+  # Compute counts and initial odds for each quintile
+  odds_data <- data %>%
+    dplyr::group_by({{ quintile_column }}) %>%
+    dplyr::summarise(
+      count_category_1 = sum({{ category_column }} == "Control", na.rm = TRUE),
+      count_category_2_6 = sum({{ category_column }} == "zCase", na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    dplyr::mutate(
+      odds = count_category_2_6 / count_category_1
+    )
+
+  # Retrieve the odds of the first quintile as the reference
+  first_quintile_odds <- odds_data$odds[1]
+
+  # Calculate the odds ratio relative to the first quintile
+  odds_data <- odds_data %>%
+    dplyr::mutate(
+      odds_ratio = odds / first_quintile_odds,
+      se_log_odds_ratio = sqrt(1 / count_category_1 + 1 / count_category_2_6),
+      lower_ci = exp(log(odds_ratio) - 1.96 * se_log_odds_ratio),
+      upper_ci = exp(log(odds_ratio) + 1.96 * se_log_odds_ratio)
+    )
+
+  return(odds_data)
+}
+
+# Apply function to each odds category
+combined_odds_summary = calculate_odds_ratios(categorized_combined_data, Category, score_quintiles)
+cardiac_odds_summary = calculate_odds_ratios(categorized_combined_data,Category,  cardiac_score_quintiles)
+epilepsy_summary = calculate_odds_ratios(categorized_combined_data,Category,  epilepsy_score_quintiles)
+common_summary = calculate_odds_ratios(categorized_combined_data,Category,  common_score_quintiles)
+noncoding_summary = calculate_odds_ratios(categorized_combined_data,Category,   noncoding_score_quintiles)
+common_and_coding_summary = calculate_odds_ratios(categorized_combined_data,Category,   common_and_coding_score_quintiles)
+coding_rare_summary = calculate_odds_ratios(categorized_combined_data,Category,  coding_rare_score_quintiles)
+commmon_and_epilepsy_summary = calculate_odds_ratios(categorized_combined_data,Category, epilepsy_and_common_score_quintiles)
+cardiac_and_common_summary = calculate_odds_ratios(categorized_combined_data,Category, cardiac_and_common_score_quintiles)
+
+
+################################################################################################################ replication
+
+
+categorized_replication_data$cardiac_variant_score_replication <- predict(model_cardiomyopathy_rare, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$epilepsy_variant_score_replication <- predict(model_epilepsy_rare, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$noncoding_variant_score_replication <- predict(model_noncoding_rare, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$common_variant_score_replication <- predict(model_common, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$common_and_coding_score_replication <- predict(model_common_and_coding, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$coding_rare_score_replication <- predict(model_coding_rare, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$epilepsy_and_common_score_replication <- predict(model_epilepsy_and_common, newdata = categorized_replication_data,  type = "link")
+categorized_replication_data$cardiac_and_common_score_replication <- predict(model_cardiac_and_common, newdata = categorized_replication_data,  type = "link")
+
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(
+    rank = rank(scores_replication, ties.method = "first"),
+    score_quintiles = ceiling(rank / (n() / 5)),
+    rank_cardiac = rank(cardiac_variant_score_replication, ties.method = "first"),
+    cardiac_score_quintiles = ceiling(rank_cardiac / (n() / 5)),
+    rank_epilepsy = rank(epilepsy_variant_score_replication, ties.method = "first"),
+    epilepsy_score_quintiles = ceiling(rank_epilepsy / (n() / 5)),
+    rank_noncoding = rank(noncoding_variant_score_replication, ties.method = "first"),
+    noncoding_score_quintiles = ceiling(rank_noncoding / (n() / 5)),
+    rank_common = rank(common_variant_score_replication, ties.method = "first"),
+    common_score_quintiles = ceiling(rank_common / (n() / 5)),
+    rank_common_and_coding = rank(common_and_coding_score_replication, ties.method = "first"),
+    common_and_coding_score_quintiles = ceiling(rank_common_and_coding / (n() / 5)),
+    rank_model_coding_rare = rank(coding_rare_score_replication, ties.method = "first"),
+    coding_rare_score_quintiles = ceiling(rank_model_coding_rare / (n() / 5)),
+    rank_epilepsy_and_common = rank(epilepsy_and_common_score_replication, ties.method = "first"),
+    epilepsy_and_common_score_quintiles = ceiling(rank_epilepsy_and_common / (n() / 5)),
+    rank_cardiac_and_common = rank(cardiac_and_common_score_replication, ties.method = "first"),
+    cardiac_and_common_score_quintiles = ceiling(rank_cardiac_and_common / (n() / 5))
+  )
+
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(
+    probability = plogis(scores_replication),
+    cardiac_probability = plogis(cardiac_variant_score_replication),
+    epilepsy_probability = plogis(epilepsy_variant_score_replication),
+    noncoding_probability = plogis(noncoding_variant_score_replication),
+    common_probability = plogis(common_variant_score_replication),
+    common_and_coding_probability = plogis(common_and_coding_score_replication),
+    coding_rare_probability = plogis(coding_rare_score_replication),
+    epilepsy_and_common_probability = plogis(epilepsy_and_common_score_replication),
+    cardiac_and_common_probability = plogis(cardiac_and_common_score_replication),
+  )
+
+
+# Apply function to each odds category
+combined_odds_summary_replication = calculate_odds_ratios(categorized_replication_data, Category, score_quintiles)
+cardiac_odds_summary_replication = calculate_odds_ratios(categorized_replication_data,Category,  cardiac_score_quintiles)
+epilepsy_summary_replication = calculate_odds_ratios(categorized_replication_data,Category,  epilepsy_score_quintiles)
+common_summary_replication = calculate_odds_ratios(categorized_replication_data,Category,  common_score_quintiles)
+noncoding_summary_replication = calculate_odds_ratios(categorized_replication_data,Category,   noncoding_score_quintiles)
+common_and_coding_summary_replication = calculate_odds_ratios(categorized_replication_data,Category,   common_and_coding_score_quintiles)
+coding_rare_summary_replication = calculate_odds_ratios(categorized_replication_data,Category,  coding_rare_score_quintiles)
+commmon_and_epilepsy_summary_replication = calculate_odds_ratios(categorized_replication_data,Category, epilepsy_and_common_score_quintiles)
+cardiac_and_common_summary_replication = calculate_odds_ratios(categorized_replication_data,Category, cardiac_and_common_score_quintiles)
+
+```
+
+
+plot
+```{r cars28}
+
+plot(log2(combined_odds_summary$odds_ratio), 
+     ylim = c(
+         log2(min(c(combined_odds_summary$lower_ci, cardiac_odds_summary$lower_ci, epilepsy_summary$lower_ci, 
+                   common_summary$lower_ci, noncoding_summary$lower_ci, common_and_coding_summary$lower_ci, 
+                   coding_rare_summary$lower_ci))), 
+         log2(max(c(combined_odds_summary$upper_ci, cardiac_odds_summary$upper_ci, epilepsy_summary$upper_ci, 
+                   common_summary$upper_ci, noncoding_summary$upper_ci, common_and_coding_summary$upper_ci, 
+                   coding_rare_summary$upper_ci)))
+     ), 
+     pch = 19, xlab = "quintile", ylab = "Log2(Odds Ratio)", 
+     main = "Log2(Odds Ratio) Across quintiles of Score with 95% CI", 
+
+     
+# Add error bars for 95% CI - Combined
+          xaxt = "n", col = "#3C8C78")
+lines(1:length(combined_odds_summary$odds_ratio), log2(combined_odds_summary$odds_ratio), col = "#3C8C78")
+arrows(x0 = 1:length(combined_odds_summary$odds_ratio), 
+       y0 = log2(combined_odds_summary$lower_ci), 
+       y1 = log2(combined_odds_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#3C8C78")
+
+# Cardiac
+lines(1:length(cardiac_odds_summary$odds_ratio), log2(cardiac_odds_summary$odds_ratio), col = "#2E86C1")
+points(log2(cardiac_odds_summary$odds_ratio), pch = 19, col = "#2E86C1")
+arrows(x0 = 1:length(cardiac_odds_summary$odds_ratio), 
+       y0 = log2(cardiac_odds_summary$lower_ci), 
+       y1 = log2(cardiac_odds_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#2E86C1")
+
+# Epilepsy
+lines(1:length(epilepsy_summary$odds_ratio), log2(epilepsy_summary$odds_ratio), col = "#A93226")
+points(log2(epilepsy_summary$odds_ratio), pch = 19, col = "#A93226")
+arrows(x0 = 1:length(epilepsy_summary$odds_ratio), 
+       y0 = log2(epilepsy_summary$lower_ci), 
+       y1 = log2(epilepsy_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#A93226")
+
+# Common
+lines(1:length(common_summary$odds_ratio), log2(common_summary$odds_ratio), col = "#229954")
+points(log2(common_summary$odds_ratio), pch = 19, col = "#229954")
+arrows(x0 = 1:length(common_summary$odds_ratio), 
+       y0 = log2(common_summary$lower_ci), 
+       y1 = log2(common_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#229954")
+
+# Noncoding
+lines(1:length(noncoding_summary$odds_ratio), log2(noncoding_summary$odds_ratio), col = "#D68910")
+points(log2(noncoding_summary$odds_ratio), pch = 19, col = "#D68910")
+arrows(x0 = 1:length(noncoding_summary$odds_ratio), 
+       y0 = log2(noncoding_summary$lower_ci), 
+       y1 = log2(noncoding_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#D68910")
+
+# common and coding summary
+lines(1:length(common_and_coding_summary$odds_ratio), log2(common_and_coding_summary$odds_ratio), col = "Black")
+points(log2(common_and_coding_summary$odds_ratio), pch = 19, col = "Black")
+arrows(x0 = 1:length(common_and_coding_summary$odds_ratio), 
+       y0 = log2(common_and_coding_summary$lower_ci), 
+       y1 = log2(common_and_coding_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "Black")
+
+# coding rare summary
+lines(1:length(coding_rare_summary$odds_ratio), log2(coding_rare_summary$odds_ratio), col = "Pink")
+points(log2(coding_rare_summary$odds_ratio), pch = 19, col = "Pink")
+arrows(x0 = 1:length(coding_rare_summary$odds_ratio), 
+       y0 = log2(coding_rare_summary$lower_ci), 
+       y1 = log2(coding_rare_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "Pink")
+
+# Add x-axis labels for quintiles
+axis(1, at = 1:length(combined_odds_summary$odds_ratio), labels = TRUE)
+
+# legend 
+legend("topleft", legend = c("Combined", "Cardiac", "Epilepsy", "Common", "Noncoding", "common_and_coding", "model_coding_rare"), 
+       col = c("#3C8C78", "#2E86C1", "#A93226", "#229954", "#D68910", "Black", "Pink"), pch = 19, cex = 0.8)
+
+
+```
+
+
+plot replication
+```{r cars29}
+
+
+plot(log2(combined_odds_summary_replication$odds_ratio), 
+          ylim = c(-2,10), 
+     pch = 19, xlab = "quintile", ylab = "Log2(Odds Ratio)", 
+     main = "Log2(Odds Ratio) Across quintiles of Score with 95% CI", 
+     
+# Add error bars for 95% CI - Combined
+          xaxt = "n", col = "#3C8C78")
+lines(1:length(combined_odds_summary_replication$odds_ratio), log2(combined_odds_summary_replication$odds_ratio), col = "#3C8C78")
+arrows(x0 = 1:length(combined_odds_summary_replication$odds_ratio), 
+       y0 = log2(combined_odds_summary_replication$lower_ci), 
+       y1 = log2(combined_odds_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#3C8C78")
+
+# Cardiac
+lines(1:length(cardiac_odds_summary_replication$odds_ratio), log2(cardiac_odds_summary_replication$odds_ratio), col = "#2E86C1")
+points(log2(cardiac_odds_summary_replication$odds_ratio), pch = 19, col = "#2E86C1")
+arrows(x0 = 1:length(cardiac_odds_summary_replication$odds_ratio), 
+       y0 = log2(cardiac_odds_summary_replication$lower_ci), 
+       y1 = log2(cardiac_odds_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#2E86C1")
+
+# Epilepsy
+lines(1:length(epilepsy_summary_replication$odds_ratio), log2(epilepsy_summary_replication$odds_ratio), col = "#A93226")
+points(log2(epilepsy_summary_replication$odds_ratio), pch = 19, col = "#A93226")
+arrows(x0 = 1:length(epilepsy_summary_replication$odds_ratio), 
+       y0 = log2(epilepsy_summary_replication$lower_ci), 
+       y1 = log2(epilepsy_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#A93226")
+
+# Common
+lines(1:length(common_summary_replication$odds_ratio), log2(common_summary_replication$odds_ratio), col = "#229954")
+points(log2(common_summary_replication$odds_ratio), pch = 19, col = "#229954")
+arrows(x0 = 1:length(common_summary_replication$odds_ratio), 
+       y0 = log2(common_summary_replication$lower_ci), 
+       y1 = log2(common_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#229954")
+
+# Noncoding
+lines(1:length(noncoding_summary_replication$odds_ratio), log2(noncoding_summary_replication$odds_ratio), col = "#D68910")
+points(log2(noncoding_summary_replication$odds_ratio), pch = 19, col = "#D68910")
+arrows(x0 = 1:length(noncoding_summary_replication$odds_ratio), 
+       y0 = log2(noncoding_summary_replication$lower_ci), 
+       y1 = log2(noncoding_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#D68910")
+
+# common and coding summary
+lines(1:length(common_and_coding_summary_replication$odds_ratio), log2(common_and_coding_summary_replication$odds_ratio), col = "Black")
+points(log2(common_and_coding_summary_replication$odds_ratio), pch = 19, col = "Black")
+arrows(x0 = 1:length(common_and_coding_summary_replication$odds_ratio), 
+       y0 = log2(common_and_coding_summary_replication$lower_ci), 
+       y1 = log2(common_and_coding_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "Black")
+
+# coding rare summary
+lines(1:length(coding_rare_summary_replication$odds_ratio), log2(coding_rare_summary_replication$odds_ratio), col = "Pink")
+points(log2(coding_rare_summary_replication$odds_ratio), pch = 19, col = "Pink")
+arrows(x0 = 1:length(coding_rare_summary_replication$odds_ratio), 
+       y0 = log2(coding_rare_summary_replication$lower_ci), 
+       y1 = log2(coding_rare_summary_replication$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "Pink")
+
+# Add x-axis labels for quintiles
+axis(1, at = 1:length(combined_odds_summary_replication$odds_ratio), labels = TRUE)
+
+# legend 
+legend("topleft", legend = c("Combined", "Cardiac", "Epilepsy", "Common", "Noncoding", "common_and_coding", "model_coding_rare"), 
+       col = c("#3C8C78", "#2E86C1", "#A93226", "#229954", "#D68910", "Black", "Pink"), pch = 19, cex = 0.8)
+
+
+```
+
+
+Z test for odds significance
+```{r cars30}
+compare_odds <- function(odds1, odds2) {
+  # Calculate the difference in log odds
+  log_odds1 <- log(odds1$odds_ratio)
+  log_odds2 <- log(odds2$odds_ratio)
+  delta_log_odds <- log_odds1 - log_odds2
+  
+  # Calculate the standard error of the difference
+  se1 <- odds1$se_log_odds_ratio
+  se2 <- odds2$se_log_odds_ratio
+  se_delta_log_odds <- sqrt(se1^2 + se2^2)
+  
+  # Z-test for each quintile
+  z_values <- delta_log_odds / se_delta_log_odds
+  p_values <- 2 * pnorm(abs(z_values), lower.tail = FALSE)  
+  
+  # Return a data frame with the results
+  return(data.frame(quintile = 1:length(p_values), p_values = p_values))
+}
+
+# Apply the function to compare 'coding_rare_summary', 'common_and_coding_summary', and 'combined_odds_summary'
+p_values_coding_vs_common_coding <- compare_odds(coding_rare_summary, common_and_coding_summary)
+p_values_coding_vs_model <- compare_odds(coding_rare_summary, combined_odds_summary)
+p_values_common_coding_vs_model <- compare_odds(common_and_coding_summary, combined_odds_summary)
+
+# Combine the data frames with an identifier for each comparison
+p_values_coding_vs_common_coding$comparison <- "Coding vs Common and Coding"
+p_values_coding_vs_model$comparison <- "Coding vs Model"
+p_values_common_coding_vs_model$comparison <- "Common and Coding vs Model"
+
+# Bind the rows together
+combined_p_values <- bind_rows(p_values_coding_vs_common_coding,
+                               p_values_coding_vs_model,
+                               p_values_common_coding_vs_model)
+
+# Convert quintile to a factor for better axis labeling
+combined_p_values$quintile <- factor(combined_p_values$quintile, levels = 1:5)
+
+combined_p_values
+```
+
+
+Calculate the scores per category and plot them
+
+```{r cars31}
+#plot
+common_variant_score_plot <- ggplot(categorized_combined_data, aes(x = Category, y = common_variant_score, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-2, 2) +  
+    theme_cowplot(12)
+
+cardiac_variant_score_plot <-  ggplot(categorized_combined_data, aes(x = Category, y = cardiac_variant_score, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-1, 1) +  
+    theme_cowplot(12)
+
+epilepsy_variant_score_plot <-  ggplot(categorized_combined_data, aes(x = Category, y = epilepsy_variant_score, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-1, 1) +  
+    theme_cowplot(12)
+
+noncoding_variant_score_plot <-  ggplot(categorized_combined_data, aes(x = Category, y = noncoding_variant_score, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-1, 0.75) +  
+    theme_cowplot(12)
+
+scores_plot <-  ggplot(categorized_combined_data, aes(x = Category, y = scores, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-3, 3) +
+    theme_cowplot(12)
+
+suppressWarnings(print(common_variant_score_plot))
+suppressWarnings(print(cardiac_variant_score_plot))
+suppressWarnings(print(epilepsy_variant_score_plot))
+suppressWarnings(print(noncoding_variant_score_plot))
+suppressWarnings(print(scores_plot))
+```
+
+
+
+################################################################################################################ replication
+
+NOW PLOT THE Z normalized replication data
+```{r cars40}
+
+mean_common_replication <- mean(categorized_replication_data$common_variant_score_replication)
+sd_common_replication <- sd(categorized_replication_data$common_variant_score_replication)
+mean_cardiac_replication <- mean(categorized_replication_data$cardiac_variant_score_replication)
+sd_cardiac_replication <- sd(categorized_replication_data$cardiac_variant_score_replication)
+mean_epilepsy_replication <- mean(categorized_replication_data$epilepsy_variant_score_replication)
+sd_epilepsy_replication <- sd(categorized_replication_data$epilepsy_variant_score_replication)
+mean_noncoding_replication <- mean(categorized_replication_data$noncoding_variant_score_replication)
+sd_noncoding_replication <- sd(categorized_replication_data$noncoding_variant_score_replication)
+mean_scores_replication <- mean(categorized_replication_data$scores_replication)
+sd_scores_replication <- sd(categorized_replication_data$scores_replication)
+
+
+common_variant_score_replication_plot <- ggplot(categorized_replication_data, aes(x = Category, y = (common_variant_score_replication - mean_common_replication) / sd_common_replication, fill = Category)) +
+    geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-2.5, 2.5) +
+    theme_cowplot(12)
+
+cardiac_variant_score_replication_plot <-  ggplot(categorized_replication_data, aes(x = Category, y = (cardiac_variant_score_replication - mean_cardiac_replication)/ sd_cardiac_replication, fill = Category)) +
+    geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+ ylim(-2.5, 2.5) +
+  theme_cowplot(12)
+
+epilepsy_variant_score_replication_plot <-  ggplot(categorized_replication_data, aes(x = Category, y = (epilepsy_variant_score_replication - mean_epilepsy_replication)/ sd_epilepsy_replication, fill = Category)) +
+    geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+     ylim(-2.5, 2.5) +
+    theme_cowplot(12)
+
+noncoding_variant_score_replication_plot <-  ggplot(categorized_replication_data, aes(x = Category, y = (noncoding_variant_score_replication - mean_noncoding_replication)/ sd_noncoding_replication, fill = Category)) +
+    geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+     ylim(-2.5, 2.5) +
+    theme_cowplot(12)
+
+scores_replication_plot <-   ggplot(categorized_replication_data, aes(x = Category, y = (scores_replication - mean_scores_replication)/ sd_scores_replication, fill = Category)) +
+    geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+     ylim(-2.5, 2.5) +
+    theme_cowplot(12)
+
+suppressWarnings(print(common_variant_score_replication_plot))
+suppressWarnings(print(cardiac_variant_score_replication_plot))
+suppressWarnings(print(epilepsy_variant_score_replication_plot))
+suppressWarnings(print(noncoding_variant_score_replication_plot))
+suppressWarnings(print(scores_replication_plot))
+```
+
+
+
+Compute the wilcox.tests
+```{r cars41}
+
+wilcox.test_cardiomyopathy <- wilcox.test(cardiac_variant_score ~ Category, data = categorized_combined_data)
+wilcox.test_cardiomyopathy
+
+wilcox.test_epilepsy <- wilcox.test(epilepsy_variant_score ~ Category, data = categorized_combined_data)
+wilcox.test_epilepsy
+
+wilcox.test_common <- wilcox.test(common_variant_score ~ Category, data = categorized_combined_data)
+wilcox.test_common
+
+wilcox.test_noncoding <- wilcox.test(noncoding_variant_score ~ Category, data = categorized_combined_data)
+wilcox.test_noncoding
+
+wilcox.test_combined <- wilcox.test(scores ~ Category, data = categorized_combined_data)
+wilcox.test_combined
+```
+
+
+
+################################## replication
+```{r cars42}
+wilcox.test_cardiomyopathy_replication <- wilcox.test(cardiac_variant_score_replication ~ Category, data = categorized_replication_data)
+wilcox.test_cardiomyopathy_replication
+
+wilcox.test_epilepsy_replication <- wilcox.test(epilepsy_variant_score_replication ~ Category, data = categorized_replication_data)
+wilcox.test_epilepsy_replication
+
+wilcox.test_common_replication <- wilcox.test(common_variant_score_replication ~ Category, data = categorized_replication_data)
+wilcox.test_common_replication
+
+wilcox.test_noncoding_replication <- wilcox.test(noncoding_variant_score_replication ~ Category, data = categorized_replication_data)
+wilcox.test_noncoding_replication
+
+wilcox.test_combined_replication <- wilcox.test(scores_replication ~ Category, data = categorized_replication_data)
+wilcox.test_combined_replication
+
+
+```
+
+
+Plot the distribution of the categories by score
+
+```{r cars43}
+
+distribution_score_plot <- ggplot(categorized_combined_data, aes(x = scores, fill = Category)) + 
+  geom_density(aes(y = ..density..), alpha = 0.5, adjust = 1) +
+  scale_fill_manual(values = group_colors) +
+    scale_x_continuous(limits = c(-3, 4)) +
+  labs(title = "Normalized Density Plots of Scores by Category",
+       x = "Score",
+       y = "Density") +
+  theme_cowplot(12) 
+
+
+suppressWarnings(print(distribution_score_plot))
+
+```
+
+
+
+Plot the filled density of the categories by score
+
+```{r cars44}
+
+density_score_plot <- ggplot(categorized_combined_data, aes(x = scores, fill = Category)) + 
+  geom_density(position = "fill", alpha = 0.5) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(limits = c(-3, 4)) +
+  labs(title = "Stacked Density of Scores by Category",
+       x = "Score",
+       y = "Fraction") +
+  theme_cowplot() +
+  scale_fill_manual(values = group_colors)
+
+# Print the plot
+suppressWarnings(print(density_score_plot))
+
+```
+
+```{r cars45}
+# Convert 'Category' into a binary format: 0 for control (1), 1 for case (2-4)
+categorized_combined_data$binary_outcome <- ifelse(categorized_combined_data$Category == "Control", 0, 1)
+
+#Full model
+roc_result_full <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$probability, plot = TRUE)
+paste("Full model AUC:")
+auc(roc_result_full)
+
+#common variants
+roc_result_common <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$common_probability, plot = TRUE)
+paste("commonvariant model AUC:")
+auc(roc_result_common)
+
+#coding variants
+roc_result_coding <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$coding_rare_probability, plot = TRUE)
+paste("coding variant model AUC:")
+auc(roc_result_coding)
+
+#cardiac and common variants
+roc_result_cardiac_and_common <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$cardiac_and_common_probability, plot = TRUE)
+paste("coding variant model AUC:")
+auc(roc_result_cardiac_and_common)
+
+#common and coding variants
+roc_result_common_and_coding <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$common_and_coding_probability, plot = TRUE)
+paste("common and coding variant model AUC:")
+auc(roc_result_common_and_coding)
+```
+
+Plot the ROC and Precision-recall
+```{r cars46}
+# Convert 'Category' into a binary format: 0 for control (1), 1 for case (2-4)
+categorized_replication_data$binary_outcome <- ifelse(categorized_replication_data$Category == "Control", 0, 1)
+
+roc_result_full_replication <- roc(categorized_replication_data$binary_outcome, categorized_replication_data$probability, plot = TRUE)
+auc(roc_result_full_replication)
+```
+
+
+```{r cars47}
+#compute the ones not plotted
+roc_result_cardiac <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$cardiac_probability, plot = FALSE)
+roc_result_epilepsy <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$epilepsy_probability, plot = FALSE)
+roc_result_epilepsy_and_common <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$epilepsy_and_common_probability, plot = FALSE)
+roc_result_cardiac_and_common <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$cardiac_and_common_probability, plot = FALSE)
+
+# Calculate AUC for each ROC object
+auc_epilepsy <- auc(roc_result_epilepsy)
+auc_cardiac <- auc(roc_result_cardiac)
+auc_common <- auc(roc_result_common)
+auc_epilepsy_and_common <- auc(roc_result_epilepsy_and_common)
+auc_cardiac_and_common <- auc(roc_result_cardiac_and_common)
+auc_common_and_coding <- auc(roc_result_common_and_coding)
+auc_coding <- auc(roc_result_coding)
+auc_full <- auc(roc_result_full)
+
+# Base AUC for random chance
+auc_random_chance <- 0.5
+
+# Create a data frame for plotting
+percentage_changes_df <- data.frame(
+  Model = c("Epilepsy","Cardiac","Common", "Epilepsy and Common", "Cardiac and Common", "Common and Coding", "Coding", "Full"),
+  PercentageChange = c(
+    (auc_epilepsy - auc_random_chance) / auc_random_chance * 100,
+    (auc_cardiac - auc_random_chance) / auc_random_chance * 100,
+    (auc_common - auc_random_chance) / auc_random_chance * 100,
+    (auc_epilepsy_and_common - auc_random_chance) / auc_random_chance * 100,
+    (auc_cardiac_and_common - auc_random_chance) / auc_random_chance * 100,
+    (auc_common_and_coding - auc_random_chance) / auc_random_chance * 100,
+    (auc_coding - auc_random_chance) / auc_random_chance * 100,
+    (auc_full - auc_random_chance) / auc_random_chance * 100
+  )
+)
+
+
+auc_df <- data.frame(
+  Model = c("Epilepsy","Cardiac","Common", "Epilepsy and Common", "Cardiac and Common", "Common and Coding", "Coding", "Full"),
+  auc = c(
+    (auc_epilepsy),
+    (auc_cardiac),
+    (auc_common),
+    (auc_epilepsy_and_common),
+    (auc_cardiac_and_common),
+    (auc_common_and_coding),
+    (auc_coding),
+    (auc_full)
+  )
+)
+
+# Set factor levels
+percentage_changes_df$Model <- factor(percentage_changes_df$Model, levels = c(
+  "Epilepsy","Cardiac","Coding", "Common", "Epilepsy and Common", "Cardiac and Common", "Common and Coding", "Full"
+))
+
+# Plot
+auc_performance_plot <- ggplot(percentage_changes_df, aes(x = Model, y = PercentageChange, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  theme_minimal() +
+  labs(title = "Percentage Change Over Random Chance AUC",
+       y = "Percentage Change (%)",
+       x = "") +
+  theme_cowplot(12)
+
+print(auc_performance_plot)
+
+
+# Calculate p-values using DeLong's test
+p_values <- list(
+  "Epilepsy vs CMAR" = roc.test(roc_result_epilepsy, roc_result_cardiac)$p.value,
+  "CMAR vs Common" = roc.test(roc_result_common, roc_result_cardiac)$p.value,
+  "Epilepsy vs Common" = roc.test(roc_result_common, roc_result_epilepsy)$p.value,
+  "Coding vs CMAR" = roc.test(roc_result_coding, roc_result_cardiac)$p.value,
+  "Coding vs Epilepsy" = roc.test(roc_result_coding, roc_result_epilepsy)$p.value,
+  "CMAR and Common vs Common" = roc.test(roc_result_cardiac_and_common, roc_result_common)$p.value,
+  "Common vs Coding" = roc.test(roc_result_common, roc_result_coding)$p.value,
+  "CMAR and common vs Common and Coding" = roc.test(roc_result_cardiac_and_common, roc_result_common_and_coding)$p.value,
+  "Common vs Common and Coding" = roc.test(roc_result_common, roc_result_common_and_coding)$p.value,
+  "Full vs Common and Coding" = roc.test(roc_result_common_and_coding, roc_result_full)$p.value
+)
+
+# Print p-values
+print(p_values)
+```
+
+```{r cars48909}
+# Perform ANOVA on the model
+null_model <- glm(Category ~ 1, data = categorized_combined_data, family = binomial())
+
+# Perform ANOVA on the full model
+anova_results <- anova(model, test = "Chisq")
+
+# Calculate the null deviance and the full model deviance
+null_deviance <- deviance(null_model)
+full_deviance <- deviance(model)
+
+# Calculate the total sum of squares (using total deviance)
+tss <- null_deviance - full_deviance
+
+# Calculate the proportion of deviance explained by each predictor
+anova_results$Proportion_Variance_Explained <- anova_results$`Deviance` / tss
+
+# Display the results
+anova_results
+```
+
+
+
+Lets see how common and rare cardiac vars interact
+
+
+```{r cars48}
+
+# Plot
+dot_plot <- ggplot(categorized_combined_data, aes(x = rank_cardiac, y = rank_common, color = Category)) +
+  geom_point(alpha = 0.7) +  
+  scale_color_manual(values = c("1" = "blue", "2-3" = "green", "4-6" = "red")) + 
+  labs(x = "Cardiac Variant Score Rank", y = "Common Variant Score Rank", color = "Arrest Status") +
+  theme_cowplot(12) +
+  theme(strip.text.x = element_text(size = 10))
+
+
+# Plot
+dot_plot <- ggplot(categorized_combined_data, aes(x = rank_cardiac, y = rank_common, color = Category)) +
+  geom_point(alpha = 1) +  
+  scale_color_manual(values = group_colors) + 
+  labs(x = "Cardiac Variant Score Rank", y = "Common Variant Score Rank", color = "Arrest Status") +
+  theme_cowplot(12) +
+  theme(strip.text.x = element_text(size = 10))
+
+dot_plot
+
+
+median_cardiac <- median(categorized_combined_data$rank_cardiac, na.rm = TRUE)
+median_common <- median(categorized_combined_data$rank_common, na.rm = TRUE)
+
+# Filter for the top half
+quadrant1 <- categorized_combined_data %>%
+  filter(rank_cardiac <= median_cardiac & rank_common <= median_common)
+
+quadrant2 <- categorized_combined_data %>%
+  filter(rank_cardiac < median_cardiac & rank_common > median_common)
+
+quadrant3 <- categorized_combined_data %>%
+  filter(rank_cardiac > median_cardiac & rank_common < median_common)
+
+quadrant4 <- categorized_combined_data %>%
+  filter(rank_cardiac >= median_cardiac & rank_common >= median_common)
+
+
+# Combine into one data frame
+combined_quadrants <- bind_rows(
+  quadrant1 %>% mutate(Quadrant = 'Quadrant 1'),
+  quadrant2 %>% mutate(Quadrant = 'Quadrant 2'),
+  quadrant3 %>% mutate(Quadrant = 'Quadrant 3'),
+  quadrant4 %>% mutate(Quadrant = 'Quadrant 4')
+)
+
+# Calculate the count of individuals in each quadrant for each category
+# and the total count of individuals in each category
+percentage_by_category <- combined_quadrants %>%
+  group_by(Category, Quadrant) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  group_by(Category) %>%
+  mutate(Total = sum(Count), Percentage = Count / Total * 100)
+
+# View the result
+percentage_by_category
+
+# Calculate overall proportions for each quadrant
+overall_counts <- combined_quadrants %>%
+  count(Quadrant) %>%
+  mutate(OverallProportion = n / sum(n))
+
+# Calculate total counts by category for scaling expected values
+category_totals <- combined_quadrants %>%
+  count(Category) %>%
+  dplyr::rename(TotalInCategory = n)
+
+# Calculate expected counts
+expected_counts <- combined_quadrants %>%
+  dplyr::select(Category, Quadrant) %>%
+  distinct() %>%
+  left_join(overall_counts, by = "Quadrant") %>%
+  left_join(category_totals, by = "Category") %>%
+  mutate(Expected = OverallProportion * TotalInCategory)
+
+# Calculate observed counts
+observed_counts <- combined_quadrants %>%
+  count(Category, Quadrant) %>%
+  dplyr::rename(Observed = n)
+
+# combine
+combined_for_plotting <- combined_quadrants %>%
+  count(Category, Quadrant) %>%
+  dplyr::rename(Observed = n) %>%
+  left_join(overall_counts, by = "Quadrant") %>%
+  left_join(category_totals, by = "Category") %>%
+  mutate(Expected = OverallProportion * TotalInCategory, Ratio = Observed / Expected)
+
+
+# Calculate the Expected/Observed ratio
+combined_for_plotting <- combined_for_plotting %>%
+  mutate(Ratio = Observed / Expected)
+
+# Plot the Expected/Observed ratio
+quadrant_plot <- ggplot(combined_for_plotting, aes(x = Quadrant, y = Ratio, fill = Category)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(y = "Expected/Observed Ratio", x = "Quadrant", title = "Expected/Observed Ratios by Category and Quadrant") +
+  theme_cowplot(12) +
+  scale_fill_manual(values = group_colors) +  
+  geom_hline(yintercept = 1, linetype = "dashed", color = "Black")
+
+quadrant_plot
+
+# Create the contingency table
+contingency_table <- xtabs(Observed ~ Category + Quadrant, data = observed_counts)
+
+# Print the contingency table
+print(contingency_table)
+
+# Chi-squared test
+chi_squared_result <- chisq.test(contingency_table)
+
+# Print the results of the chi-squared test
+print(chi_squared_result)
+```
+
+
+```{r cars49}
+# Filter the data for cardiac_score_quintiles > 3
+top_2_quintiles <- categorized_combined_data %>%
+  filter(cardiac_score_quintiles > 3)
+
+
+common_density_score_plot <- ggplot(top_2_quintiles, aes(x = cardiac_variant_score, y = common_variant_score)) +
+  geom_point(aes(color = Category), alpha = 0.5) +  
+  geom_smooth(method = "lm", aes(group = Category, color = Category)) +  
+  labs(x = "Cardiac Variant Score", y = "Common Variant Score", title = "Cardiac Variant Score vs. Common Variant Score by Category") +
+  scale_color_manual(values = group_colors) +  
+  theme_cowplot(12)  
+
+# Highlight the specific point in red
+common_density_score_plot <- common_density_score_plot +
+  geom_point(data = subset(top_2_quintiles, ID == "CGM0000563"), aes(x = cardiac_variant_score, y = common_variant_score), color = "red")
+
+# Print 
+print(common_density_score_plot)
+
+#Do the stats
+model_common_cardiac <- lm(common_variant_score ~ cardiac_variant_score * Category, data = top_2_quintiles)
+summary(model_common_cardiac)
+```
+
+
+```{r cars50}
+epilepsy_density_score_plot <- ggplot(top_2_quintiles, aes(x = cardiac_variant_score, y = epilepsy_variant_score)) +
+  geom_point(aes(color = Category), alpha = 0.5) +  
+  geom_smooth(method = "lm", aes(group = Category, color = Category)) +  
+  labs(x = "Cardiac Variant Score", y = "Epilepsy Variant Score", title = "Cardiac Variant Score vs. Epilepsy Variant Score by Category") +
+  scale_color_manual(values = group_colors) +  
+  theme_cowplot(12)  
+
+# Highlight the specific point in red
+epilepsy_density_score_plot <- epilepsy_density_score_plot +
+  geom_point(data = subset(top_2_quintiles, ID == "CGM0000563"), aes(x = cardiac_variant_score, y = epilepsy_variant_score), color = "red")
+
+
+# Print 
+print(epilepsy_density_score_plot)
+
+
+#Do the stats
+model_epilepsy_cardiac <- lm(epilepsy_variant_score ~ cardiac_variant_score * Category, data = top_2_quintiles)
+summary(model_epilepsy_cardiac)
+```
+
+
+```{r cars51}
+# do wilcox_test
+CMARR_epilepsy_wilcox_test_results <- wilcox.test(epilepsy_variant_score ~ Category,
+                                  data = top_2_quintiles %>% filter(Category %in% c("zCase", "Control")))
+
+
+
+CMARR_epilepsy_wilcox_test_results
+
+
+CMARR_common_wilcox_test_results <- wilcox.test(common_variant_score ~ Category,
+                                  data = top_2_quintiles %>% filter(Category %in% c("zCase", "Control")))
+
+
+CMARR_common_wilcox_test_results
+
+
+```
+
+
+
+```{r cars52}
+no_PLPs_categorized_data <- categorized_combined_data %>%
+  filter(PLP_Cardiomyopathy < 1 & probability > 0.83)
+
+# Count the number of rows where arrest_group equals 1 (Controls)
+paste("number of PLP negative DISCOVERY controls over the threshold")
+nrow(no_PLPs_categorized_data %>% filter(arrest_group == 1))
+
+# Count the number of rows where arrest_group equals > 1 (Cases)
+paste("number of PLP negative DISCOVERY cases over the threshold")
+nrow(no_PLPs_categorized_data %>% filter(arrest_group > 1))
+
+
+
+#for replication
+no_PLPs_categorized_replication_data <- categorized_replication_data %>%
+  filter(PLP_Cardiomyopathy < 1 & probability > 0.7)
+
+# Count the number of rows where arrest_group equals 1 (Controls)
+paste("number of PLP negative REPLICATION controls over the threshold")
+nrow(no_PLPs_categorized_replication_data %>% filter(arrest_group == 1))
+
+# Count the number of rows where arrest_group equals > 1 (Cases)
+paste("number of PLP negative REPLICATION cases over the threshold")
+nrow(no_PLPs_categorized_replication_data %>% filter(arrest_group > 1))
+```
+
+
+
+
+
+NOW, retrain the model on the validation cohort and apply it to the discovery cohort
+```{r cars53}
+model_replication <- glm(Category ~ Normalized_Heart_rate + Normalized_PR_interval + Normalized_QTc + Normalized_BP + Normalized_QRS + Normalized_LVEF + Normalized_LVESV + Normalized_SVI + Normalized_Afib + Normalized_LVEDVI + Normalized_SV + Epilepsy_rare + Epilepsy_ultrarare + Cardiomyopathy_rare + Cardiomyopathy_ultrarare  + PLP_Epilepsy + PLP_Cardiomyopathy + Cardiomyopathy_noncoding_rare  + Epilepsy_noncoding_rare + Cardiomyopathy_null + Epilepsy_null, 
+             data = categorized_replication_data, family = binomial())
+
+model_replication
+
+scores_replication_model_on_discovery <- predict(model_replication, newdata = categorized_combined_data,  type = "link")
+
+# Add scores to the dataframes
+categorized_combined_data$scores_replication_model_on_discovery <- scores_replication_model_on_discovery
+
+# z normalize
+mean_replication_on_discovery <- mean(categorized_combined_data$scores_replication_model_on_discovery)
+sd_replication_on_discovery <- sd(categorized_combined_data$scores_replication_model_on_discovery)
+
+
+scores_replication_model_on_discovery_plot <-  ggplot(categorized_combined_data, aes(x = Category, y = (scores_replication_model_on_discovery - mean_replication_on_discovery)/sd_replication_on_discovery, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-2.5, 2.5) +  
+    theme_cowplot(12)
+
+scores_replication_model_on_discovery_plot
+
+# wilcox.test
+wilcox.test_result_replication_on_discovery <- wilcox.test(scores_replication_model_on_discovery ~ Category, data = categorized_combined_data)
+
+# View the results
+print(wilcox.test_result_replication_on_discovery)
+```
+
+
+Replication on replication
+```{r cars54}
+
+scores_replication_model_on_replication <- predict(model_replication, newdata = categorized_replication_data,  type = "link")
+
+# Add scores to the dataframes
+categorized_replication_data$scores_replication_model_on_replication <- scores_replication_model_on_replication
+
+# z normalize
+mean_replication_on_replication <- mean(categorized_replication_data$scores_replication_model_on_replication)
+sd_replication_on_replication <- sd(categorized_replication_data$scores_replication_model_on_replication)
+
+scores_replication_model_on_replication_plot <-  ggplot(categorized_replication_data, aes(x = Category, y = (scores_replication_model_on_replication - mean_replication_on_replication)/sd_replication_on_replication, fill = Category)) +
+        geom_boxplot(outlier.shape = NA, notch = TRUE) +  
+    scale_fill_manual(values = group_colors) +
+    ylim(-2.5, 2.5) +  
+    theme_cowplot(12)
+
+scores_replication_model_on_replication_plot
+
+# t-test
+wilcox.test_replication_on_replication <- wilcox.test(scores_replication_model_on_replication ~ Category, data = categorized_replication_data)
+
+# View the results
+print(wilcox.test_replication_on_replication)
+
+```
+
+
+
+
+NOW DO AUC FOR ORIGINAL DATA USING REPLICATION COEFFICIEANTS
+
+```{r cars55}
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(
+    probability_replication_on_discovery = plogis(scores_replication_model_on_discovery),
+  )
+
+# Convert 'Category' into a binary format: 0 for control (1), 1 for case (2-4)
+categorized_combined_data$binary_outcome <- ifelse(categorized_combined_data$Category == "Control", 0, 1)
+
+roc_result_full <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$probability_replication_on_discovery, plot = TRUE)
+auc(roc_result_full)
+
+# Calculate the confidence interval for the AUC
+ci_auc <- ci.auc(roc_result_full)
+
+# Print the confidence interval
+print(ci_auc)
+
+```
+
+Replication model on discovery data Odds Ratio
+```{r cars56}
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(
+    replication_model_on_discovery_rank = rank(scores_replication_model_on_discovery, ties.method = "first"),
+    replication_model_on_discovery_score_quintiles = ceiling(replication_model_on_discovery_rank / (n() / 5)),
+  )
+
+ 
+# Apply function to each odds category
+replication_model_on_discovery_combined_odds_summary = calculate_odds_ratios(categorized_combined_data, Category, replication_model_on_discovery_score_quintiles)
+
+
+plot(log2(replication_model_on_discovery_combined_odds_summary$odds_ratio), 
+     ylim = c(-2,10
+     ), 
+     pch = 19, xlab = "quintile", ylab = "Log2(Odds Ratio)", 
+     main = "Log2(Odds Ratio) Across quintiles of Score with 95% CI", 
+     xaxt = "n", col = "#3C8C78")
+lines(1:length(replication_model_on_discovery_combined_odds_summary$odds_ratio), log2(replication_model_on_discovery_combined_odds_summary$odds_ratio), col = "#3C8C78")
+
+# Add error bars for 95% CI - Combined
+arrows(x0 = 1:length(replication_model_on_discovery_combined_odds_summary$odds_ratio), 
+       y0 = log2(replication_model_on_discovery_combined_odds_summary$lower_ci), 
+       y1 = log2(replication_model_on_discovery_combined_odds_summary$upper_ci), 
+       code = 3, angle = 90, length = 0.05, col = "#3C8C78")
+
+```
+
+
+ANCESTRY
+
+```{r cars57}
+# Filter the data frame to include only rows where Category == 1
+filtered_categorized_combined_data <- subset(categorized_combined_data, Category == "Control")
+
+# Run the regression of scores on C1 to C10
+ancestry_regression_model <- lm(scores ~ PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10 + 
+                                PC11 + PC12 + PC13 + PC14 + PC15 + PC16 + PC17 + PC18 + PC19 + PC20, 
+                                data = filtered_categorized_combined_data)
+
+# Get the coefficients from the regression
+ancestry_coefficients <- coef(ancestry_regression_model)
+
+# Calculate the adjusted_scores by removing the effects of C1 to C10
+categorized_combined_data$adjusted_scores <- categorized_combined_data$scores - 
+                                             (ancestry_coefficients["(Intercept)"] + 
+                                              categorized_combined_data$PC1 * ancestry_coefficients["PC1"] + 
+                                              categorized_combined_data$PC2 * ancestry_coefficients["PC2"] + 
+                                              categorized_combined_data$PC3 * ancestry_coefficients["PC3"] + 
+                                              categorized_combined_data$PC4 * ancestry_coefficients["PC4"] + 
+                                              categorized_combined_data$PC5 * ancestry_coefficients["PC5"] +
+                                              categorized_combined_data$PC6 * ancestry_coefficients["PC6"] +
+                                              categorized_combined_data$PC7 * ancestry_coefficients["PC7"] +
+                                              categorized_combined_data$PC8 * ancestry_coefficients["PC8"] +
+                                              categorized_combined_data$PC9 * ancestry_coefficients["PC9"] +
+                                              categorized_combined_data$PC10 * ancestry_coefficients["PC10"] + 
+                                              categorized_combined_data$PC11 * ancestry_coefficients["PC11"] + 
+                                              categorized_combined_data$PC12 * ancestry_coefficients["PC12"] + 
+                                              categorized_combined_data$PC13 * ancestry_coefficients["PC13"] + 
+                                              categorized_combined_data$PC14 * ancestry_coefficients["PC14"] + 
+                                              categorized_combined_data$PC15 * ancestry_coefficients["PC15"] +
+                                              categorized_combined_data$PC16 * ancestry_coefficients["PC16"] +
+                                              categorized_combined_data$PC17 * ancestry_coefficients["PC17"] +
+                                              categorized_combined_data$PC18 * ancestry_coefficients["PC18"] +
+                                              categorized_combined_data$PC19 * ancestry_coefficients["PC19"] +
+                                              categorized_combined_data$PC20 * ancestry_coefficients["PC20"])
+
+
+```
+
+
+
+
+
+```{r cars58}
+# Calculate the adjusted probabilities by removing the effects of C1 to C20
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(adjusted_probability = plogis(adjusted_scores))
+```
+
+
+
+
+
+```{r cars59}
+# Extract PCA columns (PC1 to PC20)
+pca_columns <- categorized_combined_data[, grep("^PC\\d+$", names(categorized_combined_data))]
+
+# Perform GMM clustering
+gmm_result <- Mclust(pca_columns, G = 5)  
+
+# Extract the cluster labels from the GMM result
+final_clusters <- gmm_result$classification
+
+
+```
+
+
+
+
+```{r cars60}
+# Add the final cluster assignments to the original dataframe
+categorized_combined_data$cluster_gmm <- as.factor(final_clusters)
+
+# Visualize the clustering results
+ggplot(categorized_combined_data, aes(x = PC1, y = PC2, color = cluster_gmm)) +
+  geom_point() +
+  ggtitle("GMM Clustering of PCA Data") +
+  theme_minimal() +
+  scale_color_manual(values = rainbow(length(unique(final_clusters)))) +
+  theme(legend.position = "bottom")
+
+
+
+contingency_table <- table(categorized_combined_data$cluster_gmm, categorized_combined_data$Ancestry)
+
+contingency_df <- as.data.frame(contingency_table)
+colnames(contingency_df) <- c("Cluster", "Ancestry", "Count")
+
+# Bar plot to show the makeup of each cluster by ancestry
+ggplot(contingency_df, aes(x = Cluster, y = Count, fill = Ancestry)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  ggtitle("Makeup of Each Cluster by Ancestry") +
+  xlab("Cluster") + ylab("Count") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+
+```{r cars61}
+# Define the mapping of clusters to ancestry
+cluster_to_ancestry <- c("4" = "EUR", "2" = "HIS", "3" = "AFR", "1" = "OTH", "5" = "OTH")
+
+# Add the new column to the dataframe
+categorized_combined_data$cluster_gmm_Ancestry <- as.character(categorized_combined_data$cluster_gmm)
+
+# Reassign the clusters based on the mapping
+categorized_combined_data$cluster_gmm_Ancestry <- sapply(categorized_combined_data$cluster_gmm, function(x) cluster_to_ancestry[as.character(x)])
+
+# Convert the new column to a factor
+categorized_combined_data$cluster_gmm_Ancestry <- factor(categorized_combined_data$cluster_gmm_Ancestry, levels = unique(cluster_to_ancestry))
+
+# Create a summary dataframe with counts
+summary_data <- categorized_combined_data %>%
+  group_by(Category, cluster_gmm_Ancestry) %>%
+  summarise(count = n()) %>%
+  ungroup()
+
+# Define the Wes Anderson palette
+palette_colors <- wes_palette("FantasticFox1", length(unique(categorized_combined_data$cluster_gmm_Ancestry)), type = "continuous")
+
+
+# Create a bar plot with percentages and counts
+ancestry_makeup <- ggplot(categorized_combined_data, aes(x = Category, fill = cluster_gmm_Ancestry)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  ggtitle("Makeup of cluster_gmm_Ancestry within Each Category") +
+  xlab("Category") +
+  ylab("Percentage") +
+  theme(legend.position = "bottom") +
+  scale_fill_manual(values = palette_colors) +
+  geom_text(data = summary_data, aes(label = count, y = count / sum(count), group = cluster_gmm_Ancestry),
+            position = position_fill(vjust = 0.5), color = "black") + 
+  theme_cowplot(12)
+
+
+# Visualize the clustering results
+clusters <- ggplot(categorized_combined_data, aes(x = PC1, y = PC2, color = cluster_gmm_Ancestry)) +
+  geom_point() +
+  ggtitle("GMM Clustering of PCA Data") +
+  theme_minimal() +
+  scale_color_manual(values = palette_colors) +
+  theme(legend.position = "bottom") + 
+  theme_cowplot(12)
+
+
+ancestry_scores <- ggplot(categorized_combined_data, aes(x = cluster_gmm_Ancestry, y = scores, fill = Category)) +
+  geom_boxplot(outlier.shape = NA, notch = TRUE) +
+  labs(title = "Scores by cluster_gmm_Ancestry and Category",
+       x = "cluster_gmm_Ancestry",
+       y = "Scores") +
+      scale_fill_manual(values = group_colors) +
+  theme(legend.position = "bottom") +
+  theme_cowplot(12) +
+  ylim(-3, 3)
+
+ancestry_adjusted_scores <- ggplot(categorized_combined_data, aes(x = cluster_gmm_Ancestry, y = adjusted_scores, fill = Category)) +
+     geom_boxplot(outlier.shape = NA, notch = TRUE) +
+     labs(title = "Adjusted Scores by cluster_gmm_Ancestry and Category",
+          x = "cluster_gmm_Ancestry",
+          y = "Adjusted Scores") +
+      scale_fill_manual(values = group_colors) +
+     theme(legend.position = "bottom")+ 
+  theme_cowplot(12) +
+  ylim(-3, 3)
+
+ancestry_adjusted__total_scores <- ggplot(categorized_combined_data, aes(x = Category, y = adjusted_scores, fill = Category)) +
+     geom_boxplot(outlier.shape = NA, notch = TRUE) +
+     labs(title = "Adjusted Scores by cluster_gmm_Ancestry and Category",
+          x = "cluster_gmm_Ancestry",
+          y = "Adjusted Scores") +
+      scale_fill_manual(values = group_colors) +
+     theme(legend.position = "bottom")+ 
+  theme_cowplot(12) +
+  ylim(-3, 3)
+
+clusters
+ancestry_makeup
+suppressWarnings(print(ancestry_scores))
+suppressWarnings(print(ancestry_adjusted_scores))
+suppressWarnings(print(ancestry_adjusted__total_scores))
+
+wilcox.test(adjusted_scores ~ Category, data = categorized_combined_data)
+
+# Perform the Wilcoxon test within each ancestry group
+wilcox_results <- categorized_combined_data %>%
+  group_by(cluster_gmm_Ancestry) %>%
+  summarise(
+    p_value = wilcox.test(adjusted_scores ~ Category)$p.value
+  )
+
+# Print the results
+print(wilcox_results)
+
+
+# Perform the Wilcoxon test within each ancestry group
+wilcox_results <- categorized_combined_data %>%
+  group_by(cluster_gmm_Ancestry) %>%
+  summarise(
+    p_value = wilcox.test(scores ~ Category)$p.value
+  )
+
+# Print the results
+print(wilcox_results)
+```
+
+
+
+Odds ratios in the highest quintile across ancestry, adjusted
+```{r cars62}
+categorized_combined_data <- categorized_combined_data %>%
+  mutate(
+    rank_adjusted = rank(adjusted_scores, ties.method = "first"),
+    score_adjusted_quintiles = ceiling(rank_adjusted / (n() / 5))
+  )
+
+#subset by ancestry
+AFR <- categorized_combined_data[categorized_combined_data$cluster_gmm_Ancestry == "AFR", ]
+HIS <- categorized_combined_data[categorized_combined_data$cluster_gmm_Ancestry == "HIS", ]
+EUR <- categorized_combined_data[categorized_combined_data$cluster_gmm_Ancestry == "EUR", ]
+OTH <- categorized_combined_data[categorized_combined_data$cluster_gmm_Ancestry == "OTH", ]
+
+# Apply the OR funciton you made way earlier
+combined_odds_summary = calculate_odds_ratios(categorized_combined_data, Category, score_quintiles)
+combined_odds_summary_AFR = calculate_odds_ratios(AFR, Category, score_quintiles)
+combined_odds_summary_HIS = calculate_odds_ratios(HIS, Category, score_quintiles)
+combined_odds_summary_EUR = calculate_odds_ratios(EUR, Category, score_quintiles)
+combined_odds_summary_OTH = calculate_odds_ratios(OTH, Category, score_quintiles)
+
+combined_odds_summary
+combined_odds_summary_AFR 
+combined_odds_summary_HIS 
+combined_odds_summary_EUR 
+combined_odds_summary_OTH 
+
+# Apply the OR funciton you made way earlier
+
+combined_odds_summary_adjust= calculate_odds_ratios(categorized_combined_data, Category, score_adjusted_quintiles)
+combined_odds_summary_AFR_adjust = calculate_odds_ratios(AFR, Category, score_adjusted_quintiles)
+combined_odds_summary_HIS_adjust = calculate_odds_ratios(HIS, Category, score_adjusted_quintiles)
+combined_odds_summary_EUR_adjust = calculate_odds_ratios(EUR, Category, score_adjusted_quintiles)
+combined_odds_summary_OTH_adjust = calculate_odds_ratios(OTH, Category, score_adjusted_quintiles)
+
+combined_odds_summary_adjust
+combined_odds_summary_AFR_adjust 
+combined_odds_summary_HIS_adjust 
+combined_odds_summary_EUR_adjust 
+combined_odds_summary_OTH_adjust 
+```
+
+
+
+```{r cars63}
+# Extracting quintile 5 data for each summary
+quintile_5_data <- data.frame(
+  group = c("Total","AFR", "HIS", "EUR", "OTH"),
+  odds_ratio = c(combined_odds_summary$odds_ratio[5],
+                 combined_odds_summary_AFR$odds_ratio[5],
+                 combined_odds_summary_HIS$odds_ratio[5],
+                 combined_odds_summary_EUR$odds_ratio[5],
+                 combined_odds_summary_OTH$odds_ratio[5]),
+  lower_ci = c(combined_odds_summary$lower_ci[5],
+               combined_odds_summary_AFR$lower_ci[5],
+               combined_odds_summary_HIS$lower_ci[5],
+               combined_odds_summary_EUR$lower_ci[5],
+               combined_odds_summary_OTH$lower_ci[5]),
+  upper_ci = c(combined_odds_summary$upper_ci[5],
+               combined_odds_summary_AFR$upper_ci[5],
+               combined_odds_summary_HIS$upper_ci[5],
+               combined_odds_summary_EUR$upper_ci[5],
+               combined_odds_summary_OTH$upper_ci[5])
+)
+
+# Log2 transformation
+quintile_5_data$log2_odds_ratio <- log2(quintile_5_data$odds_ratio)
+quintile_5_data$log2_lower_ci <- log2(quintile_5_data$lower_ci)
+quintile_5_data$log2_upper_ci <- log2(quintile_5_data$upper_ci)
+
+# Define the y-limits based on the transformed data
+ylim_range <- range(-2, 6.5)
+
+# Plotting
+plot(quintile_5_data$log2_odds_ratio, ylim = ylim_range, pch = 19, xlab = "Group", ylab = "Log2(Odds Ratio)", 
+     main = "Log2(Odds Ratio) for Quintile 5 Across Different Groups", xaxt = "n", col = "#3C8474")
+axis(1, at = 1:5, labels = quintile_5_data$group)
+
+# Add error bars for 95% CI
+arrows(x0 = 1:5, y0 = quintile_5_data$log2_lower_ci, y1 = quintile_5_data$log2_upper_ci, 
+       code = 3, angle = 90, length = 0.05, col = "#3C8C78")
+```
+
+
+
+```{r cars64}
+# Extract quintile 5 data for each summary
+quintile_5_data <- data.frame(
+  group = c("Total","AFR", "HIS", "EUR", "OTH"),
+  odds_ratio = c(combined_odds_summary_adjust$odds_ratio[5],
+                 combined_odds_summary_AFR_adjust$odds_ratio[5],
+                 combined_odds_summary_HIS_adjust$odds_ratio[5],
+                 combined_odds_summary_EUR_adjust$odds_ratio[5],
+                 combined_odds_summary_OTH_adjust$odds_ratio[5]),
+  lower_ci = c(combined_odds_summary_adjust$lower_ci[5],
+               combined_odds_summary_AFR_adjust$lower_ci[5],
+               combined_odds_summary_HIS_adjust$lower_ci[5],
+               combined_odds_summary_EUR_adjust$lower_ci[5],
+               combined_odds_summary_OTH_adjust$lower_ci[5]),
+  upper_ci = c(combined_odds_summary_adjust$upper_ci[5],
+               combined_odds_summary_AFR_adjust$upper_ci[5],
+               combined_odds_summary_HIS_adjust$upper_ci[5],
+               combined_odds_summary_EUR_adjust$upper_ci[5],
+               combined_odds_summary_OTH_adjust$upper_ci[5])
+)
+
+# Log2 transformation
+quintile_5_data$log2_odds_ratio <- log2(quintile_5_data$odds_ratio)
+quintile_5_data$log2_lower_ci <- log2(quintile_5_data$lower_ci)
+quintile_5_data$log2_upper_ci <- log2(quintile_5_data$upper_ci)
+
+# Define the y-limits based on the transformed data
+ylim_range <- range(-2, 6.5)
+
+# Plot
+plot(quintile_5_data$log2_odds_ratio, ylim = ylim_range, pch = 19, xlab = "Group", ylab = "Log2(Odds Ratio)", 
+     main = "Log2(Odds Ratio) for Quintile 5 Across Different Groups, adjusted", xaxt = "n", col = "black")
+axis(1, at = 1:5, labels = quintile_5_data$group)
+
+# Add error bars for 95% CI
+arrows(x0 = 1:5, y0 = quintile_5_data$log2_lower_ci, y1 = quintile_5_data$log2_upper_ci, 
+       code = 3, angle = 90, length = 0.05, col = "black")
+```
+
+
+
+```{r cars65}
+# Convert 'Category' into a binary format: 0 for control (1), 1 for case (2-4)
+categorized_combined_data$binary_outcome <- ifelse(categorized_combined_data$Category == "Control", 0, 1)
+roc_result_full_adjusted <- roc(categorized_combined_data$binary_outcome, categorized_combined_data$adjusted_probability, plot = TRUE)
+auc(roc_result_full_adjusted)
+```
+
+
+```{r cars66}
+
+# Calculate the adjusted probabilities by removing the effects of C1 to C20
+categorized_replication_data$adjusted_scores_replication <- categorized_replication_data$scores_replication - 
+                                             (ancestry_coefficients["(Intercept)"] + 
+                                              categorized_replication_data$PC1 * ancestry_coefficients["PC1"] + 
+                                              categorized_replication_data$PC2 * ancestry_coefficients["PC2"] + 
+                                              categorized_replication_data$PC3 * ancestry_coefficients["PC3"] + 
+                                              categorized_replication_data$PC4 * ancestry_coefficients["PC4"] + 
+                                              categorized_replication_data$PC5 * ancestry_coefficients["PC5"] +
+                                              categorized_replication_data$PC6 * ancestry_coefficients["PC6"] +
+                                              categorized_replication_data$PC7 * ancestry_coefficients["PC7"] +
+                                              categorized_replication_data$PC8 * ancestry_coefficients["PC8"] +
+                                              categorized_replication_data$PC9 * ancestry_coefficients["PC9"] +
+                                              categorized_replication_data$PC10 * ancestry_coefficients["PC10"] + 
+                                              categorized_replication_data$PC11 * ancestry_coefficients["PC11"] + 
+                                              categorized_replication_data$PC12 * ancestry_coefficients["PC12"] + 
+                                              categorized_replication_data$PC13 * ancestry_coefficients["PC13"] + 
+                                              categorized_replication_data$PC14 * ancestry_coefficients["PC14"] + 
+                                              categorized_replication_data$PC15 * ancestry_coefficients["PC15"] +
+                                              categorized_replication_data$PC16 * ancestry_coefficients["PC16"] +
+                                              categorized_replication_data$PC17 * ancestry_coefficients["PC17"] +
+                                              categorized_replication_data$PC18 * ancestry_coefficients["PC18"] +
+                                              categorized_replication_data$PC19 * ancestry_coefficients["PC19"] +
+                                              categorized_replication_data$PC20 * ancestry_coefficients["PC20"])
+
+
+# Calculate the adjusted probabilities by removing the effects of C1 to C10
+categorized_replication_data <- categorized_replication_data %>%
+  mutate(adjusted_probability_replication = plogis(adjusted_scores_replication))
+
+
+# Compute the ROC curve
+roc_result_full_adjusted <- roc(categorized_replication_data$binary_outcome, categorized_replication_data$adjusted_probability_replication)
+auc(roc_result_full_adjusted)
+
+# Plot the ROC curve with the x-axis reversed
+plot(roc_result_full_adjusted,xlim = c(1, 0))
+```
+
+
+```{r cars66}
+
+# Load the necessary library
+library(dplyr)
+
+diagnosis_data <- read.table("~/Desktop/diagnosis_data.txt", header = TRUE, sep = "\t", na.strings = "", stringsAsFactors = FALSE)
+diagnosis_data$diagnosis <- ifelse(is.na(diagnosis_data$diagnosis), "Not_Available", diagnosis_data$diagnosis)
+
+# Step 2: Merge and mutate the data
+diagnosis_data2 <- categorized_combined_data %>%
+  left_join(diagnosis_data, by = "ID") %>%
+  mutate(diagnosis = if_else(is.na(diagnosis), "control", diagnosis))  # Retain 'Not_Available' from imported data
+
+
+# Step 3: Calculate the percentage of instances with probability > 0.7 within each diagnosis
+diagnosis_percentage <- diagnosis_data2 %>%
+  group_by(diagnosis) %>%
+  dplyr::summarize(
+    total_count = n(),
+    count_above_0.7 = sum(probability > 0.7),
+    percentage_above_0.7 = (count_above_0.7 / total_count) * 100
+  )
+
+# Step 4: Extract the percentage for the control group
+control_percentage <- diagnosis_percentage %>%
+  filter(diagnosis == "control") %>%
+  pull(percentage_above_0.7)
+
+# Step 5: Calculate the relative difference or ratio for each diagnosis compared to the control group
+diagnosis_comparison <- diagnosis_percentage %>%
+  mutate(
+    relative_difference = percentage_above_0.7 - control_percentage,
+    ratio_to_control = percentage_above_0.7 / control_percentage
+  )
+
+# Display the result
+print(diagnosis_comparison)
+
+# Function to calculate Wilcoxon rank sum test p-values
+calc_p_value <- function(score_column, diagnosis_column, data) {
+  control_values <- data %>% filter(diagnosis == "control") %>% pull(!!sym(score_column))
+  diagnosis_levels <- data %>% filter(diagnosis != "control") %>% pull(diagnosis) %>% unique()
+  
+  p_values <- sapply(diagnosis_levels, function(level) {
+    diagnosis_values <- data %>% filter(diagnosis == level) %>% pull(!!sym(score_column))
+    wilcox.test(diagnosis_values, control_values)$p.value
+  })
+  
+  names(p_values) <- diagnosis_levels
+  return(p_values)
+}
+
+# Calculate p-values for each score
+p_value <- calc_p_value("scores", "diagnosis", diagnosis_data2)
+p_values_common <- calc_p_value("common_variant_score", "diagnosis", diagnosis_data2)
+p_values_epilepsy <- calc_p_value("epilepsy_variant_score", "diagnosis", diagnosis_data2)
+p_values_cardiac <- calc_p_value("cardiac_variant_score", "diagnosis", diagnosis_data2)
+p_values_noncoding <- calc_p_value("noncoding_variant_score", "diagnosis", diagnosis_data2)
+
+# Combine p-values into a single data frame
+p_values_df <- data.frame(
+  diagnosis = names(p_values_common),
+  p_value = p_value,
+  common_variant_p_value = p_values_common,
+  epilepsy_variant_p_value = p_values_epilepsy,
+  cardiac_variant_p_value = p_values_cardiac,
+  noncoding_variant_p_value = p_values_noncoding
+)
+
+# Calculate the control median
+control_medians <- diagnosis_data2 %>%
+  filter(diagnosis == "control") %>%
+  dplyr::summarize(
+    control_scores = median(scores, na.rm = TRUE),
+    control_common_variant_score = median(common_variant_score, na.rm = TRUE),
+    control_epilepsy_variant_score = median(epilepsy_variant_score, na.rm = TRUE),
+    control_cardiac_variant_score = median(cardiac_variant_score, na.rm = TRUE),
+    control_noncoding_variant_score = median(noncoding_variant_score, na.rm = TRUE)
+  )
+
+# Prepare data for bubble plot using median differences
+bubble_data <- diagnosis_data2 %>%
+  group_by(diagnosis) %>%
+  dplyr::summarize(
+    scores = median(scores, na.rm = TRUE),
+    common_variant_score = median(common_variant_score, na.rm = TRUE),
+    epilepsy_variant_score = median(epilepsy_variant_score, na.rm = TRUE),
+    cardiac_variant_score = median(cardiac_variant_score, na.rm = TRUE),
+    noncoding_variant_score = median(noncoding_variant_score, na.rm = TRUE)
+  ) %>%
+  mutate(
+    diff_scores = scores - control_medians$control_scores,
+    diff_common_variant_score = common_variant_score - control_medians$control_common_variant_score,
+    diff_epilepsy_variant_score = epilepsy_variant_score - control_medians$control_epilepsy_variant_score,
+    diff_cardiac_variant_score = cardiac_variant_score - control_medians$control_cardiac_variant_score,
+    diff_noncoding_variant_score = noncoding_variant_score - control_medians$control_noncoding_variant_score
+  ) %>%
+  left_join(p_values_df, by = "diagnosis")
+
+
+# Melt the data for plotting
+bubble_data_melted <- bubble_data %>%
+  pivot_longer(cols = c(diff_scores,diff_common_variant_score, diff_epilepsy_variant_score, diff_cardiac_variant_score, diff_noncoding_variant_score),
+               names_to = "variable", values_to = "value")%>%
+  pivot_longer(cols = c(p_value, common_variant_p_value, epilepsy_variant_p_value, cardiac_variant_p_value, noncoding_variant_p_value),
+               names_to = "p_value_type", values_to = "p_value")
+
+# Filter the melted data to align p-values with their corresponding scores
+bubble_data_filtered <- bubble_data_melted %>%
+  filter((variable == "diff_scores" & p_value_type == "p_value") |
+         (variable == "diff_common_variant_score" & p_value_type == "common_variant_p_value") |
+         (variable == "diff_epilepsy_variant_score" & p_value_type == "epilepsy_variant_p_value") |
+         (variable == "diff_cardiac_variant_score" & p_value_type == "cardiac_variant_p_value") |
+         (variable == "diff_noncoding_variant_score" & p_value_type == "noncoding_variant_p_value")) %>%
+  filter(diagnosis != "NA")%>%
+  filter(diagnosis != "Other") %>%
+  filter(diagnosis != "control") 
+
+# Create bubble plot with p-value labels
+ggplot(bubble_data_filtered, aes(x = diagnosis, y = variable, size = value, color = -log10(p_value))) +
+  geom_point(alpha = 0.6) +
+  geom_text(aes(label = round(p_value, 2)), color = "black") + # Add p-value labels
+  scale_size_continuous(range = c(3, 10)) +  # Adjust size range as needed
+  scale_color_gradientn(colors = c("orange", "red"), breaks = c(1.301, 5,10,20), space = "Lab") + # Custom color scale
+  theme_minimal() +
+  labs(title = "Bubble Plot of Scores by Diagnosis",
+       x = "Diagnosis",
+       y = "Score Type",
+       size = "Scaled Value",
+       color = "-log10(P-value)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Create bubble plot with p-value labels
+ggplot(bubble_data_filtered, aes(x = diagnosis, y = variable, size = value, color = -log10(p_value))) +
+  geom_point(alpha = 0.6) +
+  #geom_text(aes(label = round(p_value, 2)), color = "black") + # Add p-value labels
+  scale_size_continuous(range = c(0, 10)) +  # Adjust size range as needed
+  scale_color_gradientn(colors = c("orange", "red"), breaks = c(1.301, 5,10,20), space = "Lab") + # Custom color scale
+  theme_minimal() +
+  labs(title = "Bubble Plot of Scores by Diagnosis",
+       x = "Diagnosis",
+       y = "Score Type",
+       size = "Scaled Value",
+       color = "-log10(P-value)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
